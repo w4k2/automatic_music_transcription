@@ -37,7 +37,11 @@ You must also download some music font for existing FluidSynth distribution and 
 ## Preparing datasets
 Each dataset may have specific rules of creation and maintanance.
 * `MAPS` - is is the most popular dataset for automatic music transcription. Is embedded into this project in `data` directory. It is important to mention, that it is modified version (changed format of audio data) and `data/MAPS` is shared under [non-comercial Creative Commons license](https://creativecommons.org/licenses/by-nc-sa/2.0/fr/deed.en_US). It is ready to use.
-* `GuitarSet` - it is dataset containing recording of guitar music and transcription in jams format.. To use it in project you need to download it. There is jupyter notebook called `prepare_guitarset.ipynb` located in `data` directory, which will help you with download, extraction and preparation of GuitarSet data to be used in the project.
+* `GuitarSet` - it is dataset containing recording of guitar music and transcription in jams format.. To use it in project you need to download it. There is jupyter notebook called `prepare_guitarset.ipynb` located in `data` directory, which will help you with download, extraction and preparation of GuitarSet data to be used in the project. If you want to do it in one command you can use `prepare_guitarset_script.py` inside data directory:
+    ```
+    cd data
+    python prepare_guitarset_script.py
+    ```
 * `SynthesizedInstruments` - this dataset needs to be created using methods for synthesized music creation. It is created by taking all transcriptions for `MAPS` and `GuitarSet` and making music from them using different synthesized instruments. Number of instruments is not limited. After choosing this option the program will look for all instruments stored in starting with word `synthesize*` in `data` directory of `dataaset_root_dir`.   
 **WARNING! you need to have valid `GuitarSet` and `MAPS` dataset before generation of synthesized instruments!**  
 To generate synthesized datasets you need to run `prepare_synthesized_datasets_script.py` and manually modify list of instruments:

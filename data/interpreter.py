@@ -41,10 +41,10 @@ def jams_to_midi(jam, q=1):
                 end=st + dur
             )
             pb = pretty_midi.PitchBend(pitch=bend_amount * q, time=st)
-            midi_ch.notes.extend(n)
-            midi_ch.pitch_bends.extend(pb)
+            midi_ch.notes.append(n)
+            midi_ch.pitch_bends.append(pb)
         if len(midi_ch.notes) != 0:
-            midi.instruments.extend(midi_ch)
+            midi.instruments.append(midi_ch)
     return midi
 
 
@@ -95,7 +95,7 @@ def visualize_jams_pt(jam, save_path=None):
     annos_pt = jam.search(namespace='pitch_contour')
     # plot pitch
     for string_tran in annos_pt:
-        handle_list.extend(mlines.Line2D([], [], color=style_dict[s],
+        handle_list.append(mlines.Line2D([], [], color=style_dict[s],
                                          label=string_dict[s]))
         df = string_tran.to_dataframe()
         pitch_s = df.value.apply(
@@ -109,9 +109,9 @@ def visualize_jams_pt(jam, save_path=None):
 
     # plot Beat
     anno_b = jam.search(namespace='beat_position')[0]
-    handle_list.extend(mlines.Line2D([], [], color='k',
+    handle_list.append(mlines.Line2D([], [], color='k',
                                      label='downbeat'))
-    handle_list.extend(mlines.Line2D([], [], color='k', linestyle='dotted',
+    handle_list.append(mlines.Line2D([], [], color='k', linestyle='dotted',
                                      label='beat'))
     for b in anno_b.data:
         t = b.time
@@ -139,7 +139,7 @@ def visualize_jams_onset(jam, save_path=None, low=None, high=None):
     if len(annos) == 0:
         annos = jam.search(namespace='pitch_midi')
     for string_tran in annos:
-        handle_list.extend(mlines.Line2D([], [], color=style_dict[s],
+        handle_list.append(mlines.Line2D([], [], color=style_dict[s],
                                          label=string_dict[s]))
         for note in string_tran:
 
@@ -179,7 +179,7 @@ def tablaturize_jams(jam, save_path=None):
         annos = jam.search(namespace='pitch_midi')
 
     for string_tran in annos:
-        handle_list.extend(mlines.Line2D([], [], color=style_dict[s],
+        handle_list.append(mlines.Line2D([], [], color=style_dict[s],
                                          label=string_dict[s]))
         for note in string_tran:
             start_time = note[0]
@@ -197,9 +197,9 @@ def tablaturize_jams(jam, save_path=None):
         if int(b.value['position']) == 1:
             plt.axvline(t, linestyle='-', color='k', alpha=0.8)
 
-    handle_list.extend(mlines.Line2D([], [], color='k',
+    handle_list.append(mlines.Line2D([], [], color='k',
                                      label='downbeat'))
-    handle_list.extend(mlines.Line2D([], [], color='k', linestyle='dotted',
+    handle_list.append(mlines.Line2D([], [], color='k', linestyle='dotted',
                                      label='beat'))
     plt.xlabel('Time (sec)')
     plt.ylabel('String Number')
