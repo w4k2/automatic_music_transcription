@@ -42,13 +42,15 @@ Each dataset may have specific rules of creation and maintanance.
     cd data
     python prepare_guitarset_script.py
     ```
-* `SynthesizedInstruments` - this dataset needs to be created using methods for synthesized music creation. It is created by taking all transcriptions for `MAPS` and `GuitarSet` and making music from them using different synthesized instruments. Number of instruments is not limited. After choosing this option the program will look for all instruments stored in starting with word `synthesize*` in `data` directory of `dataaset_root_dir`.   
+    Note: you may encounter warning about SoX library missing, but this shouldn't make any problems and you can safely ignore it.
+* `SynthesizedInstruments` - this dataset needs to be generated using methods for synthesized music creation. It is created by taking all transcriptions for `MAPS` and `GuitarSet` and making music from them using different synthesized instruments. Number of instruments is not limited. After choosing this dataset for training or evaluation the program will look for all instruments stored in directories starting with word `synthesize*` in `data` directory of `dataaset_root_dir`.   
 **WARNING! you need to have valid `GuitarSet` and `MAPS` dataset before generation of synthesized instruments!**  
-To generate synthesized datasets you need to run `prepare_synthesized_datasets_script.py` and manually modify list of instruments:
+To generate synthesized datasets you need to run `prepare_synthesized_datasets_script.py` (it takes one argument - output directory) and manually modify list of instruments (inside script):
     ```
-    python prepare_synthesized_datasets_script.py
+    python prepare_synthesized_datasets_script.py .
     ```
-
+    It may take a while...  
+    Note: _fluidsynth: panic: An error occurred while reading from stdin_ is normal error, data seems to be generated correctly and it sounds well.
 ## Training the transcription model
 The python script can be run using using the sacred syntax `with`.
 ```python

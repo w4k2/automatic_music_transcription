@@ -245,8 +245,9 @@ global guitarset
 global maps
 
 GLOBAL_PATH = sys.argv[1]
-guitarset = False
+guitarset = True
 maps = True
-with Pool(2) as pool:
-    os.mkdir(GLOBAL_PATH)
+with Pool(12) as pool:
+    if not os.path.exists(GLOBAL_PATH):
+        os.mkdir(GLOBAL_PATH)
     pool.map(generate_datasets_for_instruments, instrument_list)
