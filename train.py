@@ -1,10 +1,13 @@
+import copy
 import os
-
-
-from datetime import datetime
 import pickle
+import random
+from datetime import datetime
 
+import matplotlib.pyplot as plt
 import numpy as np
+import torch
+import torch.backends.cudnn
 from sacred import Experiment
 from sacred.commands import print_config, save_config
 from sacred.observers import FileStorageObserver
@@ -13,23 +16,30 @@ from torch.optim.lr_scheduler import StepLR
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
-from model.dataset import SynthesizedTrumpet, OriginalMAPS
-from model.dataset import SynthesizedInstruments
 
-from model.evaluate_fn import evaluate_wo_velocity
-from model import *
-from snapshot import Snapshot
 from fail_observer import FailObserver
-import copy
+from model import *
+from model.dataset import (OriginalMAPS, SynthesizedInstruments,
+                           SynthesizedTrumpet)
+from model.evaluate_fn import evaluate_wo_velocity
+from snapshot import Snapshot
 
-import matplotlib.pyplot as plt
 ex = Experiment('train_transcriber')
 
-#set random seed for whole experiment
-torch.manual_seed(33)
-import random
-random.seed(33)
-np.random.seed(33)
+
+def seed_everything(seed: int):
+    random.seed(seed)
+    os.environ['PYTHONHASHSEED'] = str(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+
+# set random seed for whole experiment
+seed_everything(33)
 # parameters for the network
 ds_ksize, ds_stride = (2, 2), (2, 2)
 mode = 'imagewise'
@@ -67,7 +77,7 @@ def config():
     learning_rate_decay_steps = 10000
     learning_rate_decay_rate = 0.98
     model_type = "unet"
-    reconstruction=False
+    reconstruction = False
 
     leave_one_out = None
 
@@ -83,9 +93,11 @@ def config():
     ex.observers.append(FileStorageObserver.create(logdir))
     ex.observers.append(fail_observer)
 
+
 def detect_epoch(filename):
     only_model_name = filename.split("/")[-1]
     return only_model_name[6:-3]
+
 
 def create_transcription_datasets(dataset_type):
     if dataset_type == "MAESTRO":
@@ -99,21 +111,23 @@ def create_transcription_datasets(dataset_type):
     elif dataset_type == "SynthesizedInstruments":
         return [(SynthesizedInstruments, ['train']), (SynthesizedInstruments, ['val']), (SynthesizedInstruments, ['test'])]
     elif dataset_type == "MAPS":
-        return [(MAPS, ['AkPnBcht', 'AkPnBsdf', 'AkPnCGdD', 'AkPnStgb', 'SptkBGAm', 'SptkBGCl','StbgTGd2']),
+        return [(MAPS, ['AkPnBcht', 'AkPnBsdf', 'AkPnCGdD', 'AkPnStgb', 'SptkBGAm', 'SptkBGCl', 'StbgTGd2']),
                 (MAPS, ['ENSTDkAm', 'ENSTDkCl']),
                 (MAPS, ['ENSTDkAm', 'ENSTDkCl'])]
     elif dataset_type == "OriginalMAPS":
-        return [(OriginalMAPS, ['AkPnBcht', 'AkPnBsdf', 'AkPnCGdD', 'AkPnStgb', 'SptkBGAm', 'SptkBGCl','StbgTGd2']),
+        return [(OriginalMAPS, ['AkPnBcht', 'AkPnBsdf', 'AkPnCGdD', 'AkPnStgb', 'SptkBGAm', 'SptkBGCl', 'StbgTGd2']),
                 (OriginalMAPS, ['ENSTDkAm', 'ENSTDkCl']),
                 (OriginalMAPS, ['ENSTDkAm', 'ENSTDkCl'])]
 
+
 def create_model(model_type):
-    if model_type=="resnet":
+    if model_type == "resnet":
         print("Using resnet transcription model")
         return ResnetTranscriptionModel
-    else: #fallback for unet
+    else:  # fallback for unet
         print("Using unet transcription model")
         return NetWithAdditionalHead
+
 
 @ex.automain
 def train(spec, resume_iteration, train_on, pretrained_model_path, freeze_all_layers, unfreeze_linear, unfreeze_lstm,
@@ -132,13 +146,12 @@ def train(spec, resume_iteration, train_on, pretrained_model_path, freeze_all_la
     test_dataset_groups = dataset_data[2][1]
 
     train_dataset = TrainDataset(dataset_root_dir=dataset_root_dir, groups=train_dataset_groups,
-                           sequence_length=sequence_length, device=device, refresh=refresh)
-        # validation_dataset = MAESTRO(groups=validation_groups, sequence_length=sequence_length)
+                                 sequence_length=sequence_length, device=device, refresh=refresh)
+    # validation_dataset = MAESTRO(groups=validation_groups, sequence_length=sequence_length)
     validation_dataset = ValidationDataset(dataset_root_dir=dataset_root_dir, groups=val_dataset_groups,
                                            sequence_length=sequence_length, device=device, refresh=refresh)
     test_dataset = TestDataset(dataset_root_dir=dataset_root_dir, groups=test_dataset_groups,
                                sequence_length=sequence_length, device=device, refresh=refresh)
-
 
     loader = DataLoader(train_dataset, batch_size, shuffle=True, drop_last=True)
     valloader = DataLoader(validation_dataset, 4,
@@ -149,7 +162,7 @@ def train(spec, resume_iteration, train_on, pretrained_model_path, freeze_all_la
     if resume_iteration is None:
         ModelClass = create_model(model_type)
         model = ModelClass(ds_ksize=ds_ksize, ds_stride=ds_stride, reconstruction=reconstruction, mode=mode,
-                                      spec=spec, norm=sparsity, device=device, linear_head=linear_head, conv_head=conv_head)
+                           spec=spec, norm=sparsity, device=device, linear_head=linear_head, conv_head=conv_head)
         model.to(device)
         if pretrained_model_path != None:
             pretrained_model_path = pretrained_model_path
@@ -183,7 +196,6 @@ def train(spec, resume_iteration, train_on, pretrained_model_path, freeze_all_la
 
     # loop = tqdm(range(resume_iteration + 1, iterations + 1))
     total_batch = len(loader.dataset)
-    
 
     for ep in range(1, epoches+1):
         model.train()
