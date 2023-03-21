@@ -6,6 +6,7 @@ from glob import glob
 import sys
 import pickle
 from matplotlib.style import available
+from .tensor_visualizer import TensorVisualizer
 
 
 import numpy as np
@@ -20,13 +21,15 @@ import librosa
 
 
 class PianoRollAudioDataset(Dataset):
-    def __init__(self, path, dataset_root_dir=".", groups=None, sequence_length=None, seed=42, refresh=False, device='cpu'):
+    def __init__(self, path, dataset_root_dir=".", groups=None, sequence_length=None, seed=42, refresh=False, device='cpu', TOTAL_DEBUG=False, logdir="runs/logdir"):
+        self.TOTAL_DEBUG=TOTAL_DEBUG
         self.path = os.path.join(dataset_root_dir, path)
         self.groups = groups if groups is not None else self.available_groups()
         self.sequence_length = sequence_length
         self.device = device
         self.random = np.random.RandomState(seed)
         self.refresh = refresh
+        self.tensor_visualizer = TensorVisualizer(logdir)
 
         self.data = []
         print(f"Loading {len(groups)} group{'s' if len(groups) > 1 else ''} "
@@ -94,6 +97,11 @@ class PianoRollAudioDataset(Dataset):
         result['offset'] = (result['label'] == 1).to(self.device).float()
         result['frame'] = (result['label'] > 1).to(self.device).float()
         result['velocity'] = result['velocity'].to(self.device).float()
+        if self.TOTAL_DEBUG:
+            copy_of_audio = result['audio'].clone().detach()
+            copy_of_frame = result['frame'].clone().detach()
+            self.tensor_visualizer.save_audio_from_pytorch_tensor(copy_of_audio, result['path'], index)
+            self.tensor_visualizer.save_pianoroll_from_pytorch_tensor(copy_of_frame, result['path'], index)
         # print(f"result['audio'].shape = {result['audio'].shape}")
         # print(f"result['label'].shape = {result['label'].shape}")
         #print(f"DEBUG - path: {result['path']} audio shape: {result['audio'].shape} label shape: {result['label'].shape}")
@@ -186,9 +194,9 @@ class PianoRollAudioDataset(Dataset):
 
 class MAESTRO(PianoRollAudioDataset):
 
-    def __init__(self, dataset_root_dir=".", path='MAESTRO/', groups=None, sequence_length=None, seed=42, refresh=False, device='cpu'):
+    def __init__(self, dataset_root_dir=".", path='MAESTRO/', groups=None, sequence_length=None, seed=42, refresh=False, device='cpu', TOTAL_DEBUG=False, logdir="runs/logdir"):
         super().__init__(path, dataset_root_dir, groups if groups is not None else [
-            'train'], sequence_length, seed, refresh, device)
+            'train'], sequence_length, seed, refresh, device, TOTAL_DEBUG, logdir)
 
     @classmethod
     def available_groups(cls):
@@ -228,9 +236,9 @@ class MAESTRO(PianoRollAudioDataset):
 
 class GuitarSet(PianoRollAudioDataset):
 
-    def __init__(self, dataset_root_dir=".", path='data/guitarset', groups=None, sequence_length=None, seed=42, refresh=False, device='cpu'):
+    def __init__(self, dataset_root_dir=".", path='data/guitarset', groups=None, sequence_length=None, seed=42, refresh=False, device='cpu', TOTAL_DEBUG=False, logdir="runs/logdir"):
         super().__init__(path, dataset_root_dir, groups if groups is not None else [
-            'all'], sequence_length, seed, refresh, device)
+            'all'], sequence_length, seed, refresh, device, TOTAL_DEBUG, logdir)
 
     @classmethod
     def available_groups(cls):
@@ -261,9 +269,9 @@ class GuitarSet(PianoRollAudioDataset):
 
 class SynthesizedTrumpet(PianoRollAudioDataset):
 
-    def __init__(self, dataset_root_dir=".", path='data/synthesize_trumpet', groups=None, sequence_length=None, seed=42, refresh=False, device='cpu'):
+    def __init__(self, dataset_root_dir=".", path='data/synthesize_trumpet', groups=None, sequence_length=None, seed=42, refresh=False, device='cpu', TOTAL_DEBUG=False, logdir="runs/logdir"):
         super().__init__(path, dataset_root_dir, groups if groups is not None else [
-            'all'], sequence_length, seed, refresh, device)
+            'all'], sequence_length, seed, refresh, device, TOTAL_DEBUG, logdir)
 
     @classmethod
     def available_groups(cls):
@@ -304,9 +312,9 @@ def find_unique_elements_for_lists(list1, list2):
 
 class SynthesizedInstruments(PianoRollAudioDataset):
 
-    def __init__(self, dataset_root_dir=".",  path='data/synthesize', groups=None, sequence_length=None, seed=42, refresh=False, device='cpu'):
+    def __init__(self, dataset_root_dir=".",  path='data/synthesize', groups=None, sequence_length=None, seed=42, refresh=False, device='cpu', TOTAL_DEBUG=False, logdir="runs/logdir"):
         super().__init__(path, dataset_root_dir, groups if groups is not None else [
-            'all'], sequence_length, seed, refresh, device)
+            'all'], sequence_length, seed, refresh, device, TOTAL_DEBUG, logdir)
 
     @classmethod
     def available_groups(cls):
@@ -359,11 +367,11 @@ class SynthesizedInstruments(PianoRollAudioDataset):
 
 
 class MAPS(PianoRollAudioDataset):
-    def __init__(self, dataset_root_dir=".",  path='data/MAPS', groups=None, sequence_length=None, overlap=True, seed=42, refresh=False, device='cpu'):
+    def __init__(self, dataset_root_dir=".",  path='data/MAPS', groups=None, sequence_length=None, overlap=True, seed=42, refresh=False, device='cpu', TOTAL_DEBUG=False, logdir="runs/logdir"):
         self.overlap = overlap
         print("Initializing MAPS dataset!")
         super().__init__(path, dataset_root_dir, groups if groups is not None else [
-            'ENSTDkAm', 'ENSTDkCl'], sequence_length, seed, refresh, device)
+            'ENSTDkAm', 'ENSTDkCl'], sequence_length, seed, refresh, device, TOTAL_DEBUG, logdir)
 
     @classmethod
     def available_groups(cls):
@@ -392,11 +400,11 @@ class MAPS(PianoRollAudioDataset):
 
 
 class OriginalMAPS(PianoRollAudioDataset):
-    def __init__(self, dataset_root_dir=".",  path='MAPS', groups=None, sequence_length=None, overlap=True, seed=42, refresh=False, device='cpu'):
+    def __init__(self, dataset_root_dir=".",  path='MAPS', groups=None, sequence_length=None, overlap=True, seed=42, refresh=False, device='cpu', TOTAL_DEBUG=False, logdir="runs/logdir"):
         self.overlap = overlap
         print(f"Initializing original MAPS dataset with {groups}!")
         super().__init__(path, dataset_root_dir, groups if groups is not None else [
-            'ENSTDkAm', 'ENSTDkCl'], sequence_length, seed, refresh, device)
+            'ENSTDkAm', 'ENSTDkCl'], sequence_length, seed, refresh, device, TOTAL_DEBUG=TOTAL_DEBUG, logdir=logdir)
 
     @classmethod
     def available_groups(cls):
@@ -437,9 +445,9 @@ class OriginalMAPS(PianoRollAudioDataset):
         return result
 
 class MusicNet(PianoRollAudioDataset):
-    def __init__(self, dataset_root_dir=".", path='MusicNet/', groups=None, sequence_length=None, seed=42, refresh=False, device='cpu'):
+    def __init__(self, dataset_root_dir=".", path='MusicNet/', groups=None, sequence_length=None, seed=42, refresh=False, device='cpu', TOTAL_DEBUG=False, logdir="runs/logdir"):
         super().__init__(path, dataset_root_dir, groups if groups is not None else [
-            'train'], sequence_length, seed, refresh, device)
+            'train'], sequence_length, seed, refresh, device, TOTAL_DEBUG, logdir)
 
     @classmethod
     def available_groups(cls):

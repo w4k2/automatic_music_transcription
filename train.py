@@ -39,7 +39,7 @@ def seed_everything(seed: int):
 
 
 # set random seed for whole experiment
-seed_everything(33)
+seed_everything(35)
 # parameters for the network
 ds_ksize, ds_stride = (2, 2), (2, 2)
 mode = 'imagewise'
@@ -63,6 +63,7 @@ def config():
     unfreeze_conv = False
     conv_head = False
     linear_head = True
+    TOTAL_DEBUG = False
 
     batch_size = 32
     sequence_length = 327680
@@ -89,7 +90,7 @@ def config():
     destination_dir = "runs"
     logdir = f'{destination_dir}/TRAIN_TRANSCRIPTION_{model_type}_ON_{train_on}_{spec}_{mode}_' + \
         datetime.now().strftime('%y%m%d-%H%M%S')
-    fail_observer = FailObserver(logdir=logdir, snapshot_capacity=10)
+    fail_observer = FailObserver(logdir=logdir, snapshot_capacity=10, TOTAL_DEBUG=TOTAL_DEBUG)
     ex.observers.append(FileStorageObserver.create(logdir))
     ex.observers.append(fail_observer)
 
@@ -133,7 +134,7 @@ def create_model(model_type):
 def train(spec, resume_iteration, train_on, pretrained_model_path, freeze_all_layers, unfreeze_linear, unfreeze_lstm,
           unfreeze_conv, batch_size, sequence_length, learning_rate, learning_rate_decay_steps, learning_rate_decay_rate,
           leave_one_out, clip_gradient_norm, validation_length, refresh, device, reconstruction, epoches, logdir, linear_head, conv_head,
-          dataset_root_dir, model_type, fail_observer):
+          dataset_root_dir, model_type, fail_observer, TOTAL_DEBUG):
     print_config(ex.current_run)
     print("Reconstruction: ", reconstruction)
 
@@ -146,12 +147,12 @@ def train(spec, resume_iteration, train_on, pretrained_model_path, freeze_all_la
     test_dataset_groups = dataset_data[2][1]
 
     train_dataset = TrainDataset(dataset_root_dir=dataset_root_dir, groups=train_dataset_groups,
-                                 sequence_length=sequence_length, device=device, refresh=refresh)
+                                 sequence_length=sequence_length, device=device, refresh=refresh, TOTAL_DEBUG=TOTAL_DEBUG, logdir=logdir)
     # validation_dataset = MAESTRO(groups=validation_groups, sequence_length=sequence_length)
     validation_dataset = ValidationDataset(dataset_root_dir=dataset_root_dir, groups=val_dataset_groups,
-                                           sequence_length=sequence_length, device=device, refresh=refresh)
+                                           sequence_length=sequence_length, device=device, refresh=refresh, TOTAL_DEBUG=TOTAL_DEBUG, logdir=logdir)
     test_dataset = TestDataset(dataset_root_dir=dataset_root_dir, groups=test_dataset_groups,
-                               sequence_length=sequence_length, device=device, refresh=refresh)
+                               sequence_length=sequence_length, device=device, refresh=refresh, TOTAL_DEBUG=TOTAL_DEBUG, logdir=logdir)
 
     loader = DataLoader(train_dataset, batch_size, shuffle=True, drop_last=True)
     valloader = DataLoader(validation_dataset, 4,

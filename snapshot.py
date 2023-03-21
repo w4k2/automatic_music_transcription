@@ -3,7 +3,8 @@ import torch
 
 
 class Snapshot:
-    def __init__(self, logdir, snapshot_capacity):
+    def __init__(self, logdir, snapshot_capacity, TOTAL_DEBUG=False):
+        self.TOTAL_DEBUG = TOTAL_DEBUG
         self.logdir = logdir
         self.snapshot_capacity = snapshot_capacity
         self.basic_info_queue = []
@@ -32,7 +33,13 @@ class Snapshot:
                 return True
         return False
 
-    def add_to_snapshot(self, current_epoch, current_loss, basic_info, model_state_dict, optimizer_state_dict, scheduler_state_dict):
+    def add_to_snapshot(self,
+                        current_epoch,
+                        current_loss,
+                        basic_info,
+                        model_state_dict,
+                        optimizer_state_dict,
+                        scheduler_state_dict):
         self.loss_monitor.append(current_loss)
         if not self.is_in_warning:
             self.is_in_warning = self.is_in_warning_based_on_loss(current_loss)
@@ -40,18 +47,19 @@ class Snapshot:
             self.internal_counter -= 1
             if(self.internal_counter <= 0):
                 self.trigger_snapshot()
-            
-        if(len(self.basic_info_queue) >= self.snapshot_capacity):
-            del self.basic_info_queue[0]
-        if(len(self.model_queue) >= self.snapshot_capacity):
-            os.remove(self.model_queue[0])
-            del self.model_queue[0]
-        if(len(self.optimizer_queue) >= self.snapshot_capacity):
-            os.remove(self.optimizer_queue[0])
-            del self.optimizer_queue[0]
-        if(len(self.scheduler_queue) >= self.snapshot_capacity):
-            os.remove(self.scheduler_queue[0])
-            del self.scheduler_queue[0]
+        # don't remove models in TOTAL_DEBUG mode
+        if not self.TOTAL_DEBUG:
+            if(len(self.basic_info_queue) >= self.snapshot_capacity):
+                del self.basic_info_queue[0]
+            if(len(self.model_queue) >= self.snapshot_capacity):
+                os.remove(self.model_queue[0])
+                del self.model_queue[0]
+            if(len(self.optimizer_queue) >= self.snapshot_capacity):
+                os.remove(self.optimizer_queue[0])
+                del self.optimizer_queue[0]
+            if(len(self.scheduler_queue) >= self.snapshot_capacity):
+                os.remove(self.scheduler_queue[0])
+                del self.scheduler_queue[0]
 
         self.basic_info_queue.append(basic_info)
         model_path = os.path.join(self.snapshot_dir, f"{current_epoch}_model.pt")

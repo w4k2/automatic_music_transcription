@@ -65,7 +65,7 @@ def evaluate_classification(data_loader, model: InstrumentRecognitionModel, batc
     return metrics
 
 
-def evaluate_wo_velocity(data, model, onset_threshold=0.5, frame_threshold=0.5, save_path=None, reconstruction=True):
+def evaluate_wo_velocity(data, model, onset_threshold=0.5, frame_threshold=0.5, save_path=None, reconstruction=False):
     metrics = defaultdict(list)
 
     for label in data:
