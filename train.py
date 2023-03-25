@@ -62,6 +62,7 @@ def config():
     conv_head = False
     linear_head = True
     TOTAL_DEBUG = False
+    CUSTOM_MODEL = False
 
     batch_size = 32
     sequence_length = 327680
@@ -135,7 +136,7 @@ def create_model(model_type):
 def train(spec, resume_iteration, train_on, pretrained_model_path, freeze_all_layers, unfreeze_linear, unfreeze_lstm,
           unfreeze_conv, batch_size, sequence_length, learning_rate, learning_rate_decay_steps, learning_rate_decay_rate,
           leave_one_out, clip_gradient_norm, validation_length, refresh, device, reconstruction, epoches, logdir, linear_head, conv_head,
-          dataset_root_dir, model_type, fail_observer, TOTAL_DEBUG):
+          dataset_root_dir, model_type, fail_observer, TOTAL_DEBUG, CUSTOM_MODEL):
     print_config(ex.current_run)
     print("Reconstruction: ", reconstruction)
 
@@ -166,17 +167,27 @@ def train(spec, resume_iteration, train_on, pretrained_model_path, freeze_all_la
         model = ModelClass(ds_ksize=ds_ksize, ds_stride=ds_stride, reconstruction=reconstruction, mode=mode,
                            spec=spec, norm=sparsity, device=device, linear_head=linear_head, conv_head=conv_head, TOTAL_DEBUG=TOTAL_DEBUG, logdir=logdir)
         model.to(device)
-        if pretrained_model_path != None:
+        if pretrained_model_path != None and CUSTOM_MODEL == False:
             pretrained_model_path = pretrained_model_path
             print("Copying from ", pretrained_model_path)
             pretrained_model = torch.load(pretrained_model_path)
             model.load_my_state_dict(pretrained_model)
             optimizer = torch.optim.Adam(model.parameters(), learning_rate)
             detected_epoch = detect_epoch(pretrained_model_path)
-            optimizer.load_state_dict(torch.load(
-                os.path.join(os.path.dirname(pretrained_model_path), f'last-optimizer-state-{detected_epoch}.pt')))
+            optimizer.load_state_dict(torch.load(os.path.join(os.path.dirname(pretrained_model_path), f'last-optimizer-state-{detected_epoch}.pt')))
+            scheduler = StepLR(optimizer, step_size=learning_rate_decay_steps, gamma=learning_rate_decay_rate)
+        elif CUSTOM_MODEL == True:
+            print("CUSTOM MODEL LOADING")
+            pretrained_model_path = "runs/TRAIN_TRANSCRIPTION_unet_ON_SynthesizedInstruments_CQT_imagewise_230324-235507/SNAPSHOT/29_model.pt"
+            print("Copying from ", pretrained_model_path)
+            model.load_my_state_dict(torch.load(pretrained_model_path))
+            optimizer = torch.optim.Adam(model.parameters(), learning_rate)
+            optimizer.load_state_dict(torch.load("runs/TRAIN_TRANSCRIPTION_unet_ON_SynthesizedInstruments_CQT_imagewise_230324-235507/SNAPSHOT/29_optimizer.pt"))
+            scheduler = StepLR(optimizer, step_size=learning_rate_decay_steps, gamma=learning_rate_decay_rate)
+            scheduler.load_state_dict(torch.load("runs/TRAIN_TRANSCRIPTION_unet_ON_SynthesizedInstruments_CQT_imagewise_230324-235507/SNAPSHOT/29_scheduler.pt"))
         else:
             optimizer = torch.optim.Adam(model.parameters(), learning_rate)
+            scheduler = StepLR(optimizer, step_size=learning_rate_decay_steps, gamma=learning_rate_decay_rate)
             resume_iteration = 0
         if freeze_all_layers:
             model.freeze_all_layers()
@@ -193,8 +204,7 @@ def train(spec, resume_iteration, train_on, pretrained_model_path, freeze_all_la
             os.path.join(trained_dir, 'last-optimizer-state.pt')))
 
     summary(model)
-    scheduler = StepLR(
-        optimizer, step_size=learning_rate_decay_steps, gamma=learning_rate_decay_rate)
+   
 
     # loop = tqdm(range(resume_iteration + 1, iterations + 1))
     total_batch = len(loader.dataset)
@@ -206,7 +216,7 @@ def train(spec, resume_iteration, train_on, pretrained_model_path, freeze_all_la
         batch_idx = 0
         # print(f'ep = {ep}, lr = {scheduler.get_lr()}')
         for batch in loader:
-            predictions, losses, _ = model.run_on_batch(batch)
+            predictions, losses, _ = model.run_on_batch(batch, ep)
             clip_grad_norm_(model.parameters(), clip_gradient_norm)
             loss = sum(losses.values())
             total_loss += loss.item()
@@ -258,7 +268,7 @@ def train(spec, resume_iteration, train_on, pretrained_model_path, freeze_all_la
 
         # Load one batch from validation_dataset
 
-        predictions, losses, mel = model.run_on_batch(batch_visualize)
+        predictions, losses, mel = model.run_on_batch(batch_visualize, "validation")
         if ep == 1:  # Showing the original transcription and spectrograms
             fig, axs = plt.subplots(2, 2, figsize=(24, 8))
             axs = axs.flat

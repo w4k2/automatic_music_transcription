@@ -65,11 +65,10 @@ def evaluate_classification(data_loader, model: InstrumentRecognitionModel, batc
     return metrics
 
 
-def evaluate_wo_velocity(data, model, onset_threshold=0.5, frame_threshold=0.5, save_path=None, reconstruction=False):
+def evaluate_wo_velocity(validation_dataset, model, onset_threshold=0.5, frame_threshold=0.5, save_path=None, reconstruction=False):
     metrics = defaultdict(list)
-
-    for label in data:
-        pred, losses, _ = model.run_on_batch(label)
+    for label in validation_dataset:
+        pred, losses, _ = model.run_on_batch(label, "evaluation")
 
         for key, loss in losses.items():
             metrics[key].append(loss.item())
@@ -81,14 +80,6 @@ def evaluate_wo_velocity(data, model, onset_threshold=0.5, frame_threshold=0.5, 
             label['onset'], label['frame'])
         p_est, i_est = extract_notes_wo_velocity(
             pred['onset'], pred['frame'], onset_threshold, frame_threshold)
-
-        predictions = (pred['onset'] > 0.5).long()
-        labels = (label['onset'] > 0.5).long()
-        levensthein_distance = 0
-        for i in range(predictions.shape[0]):
-            levensthein_distance += distance(
-                str(predictions[i].tolist()), str(labels[i].tolist()))
-        metrics['metric/note/levensthein'].append(levensthein_distance)
 
         t_ref, f_ref = notes_to_frames(p_ref, i_ref, label['frame'].shape)
         t_est, f_est = notes_to_frames(p_est, i_est, pred['frame'].shape)

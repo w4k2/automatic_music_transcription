@@ -175,8 +175,8 @@ class PianoRollAudioDataset(Dataset):
         #if label extension is tsv
         if(tsv_path.split(".")[-1] == "tsv"):
             midi = np.loadtxt(tsv_path, delimiter='\t', skiprows=1)
-            # if not isinstance(midi[0], np.ndarray):
-            #     midi = [midi]
+            if not isinstance(midi[0], np.ndarray):
+                midi = [midi]
         else:
             #try with loading midi
             midi = parse_midi(tsv_path)

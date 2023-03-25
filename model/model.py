@@ -11,6 +11,7 @@ from .normalization import Normalization
 from torchvision.models import resnet18
 from .instrument_recognition_model import create_spectrogram_function
 from .tensor_visualizer import TensorVisualizer
+from .decoding import extract_notes_wo_velocity
 
 batchNorm_momentum = 0.1
 num_instruments = 1
@@ -101,6 +102,7 @@ class NetWithAdditionalHead(nn.Module):
         self.reconstruction = reconstruction
         self.conv_head = conv_head
         self.linear_head = linear_head
+        self.WARNING_FLAG = True
 
         self.Unet1_encoder = Encoder(ds_ksize, ds_stride)
         self.Unet1_decoder = Decoder(ds_ksize, ds_stride)
@@ -169,9 +171,8 @@ class NetWithAdditionalHead(nn.Module):
             #print(f"BLAX unet feat1 shape {feat1.shape}")
             return feat1, pianoroll
 
-    def run_on_batch(self, batch):
+    def run_on_batch(self, batch, epoch_number):
         audio_label = batch['audio']
-        onset_label = batch['onset']
         frame_label = batch['frame']
         # print(audio_label[0])
         # print(frame_label[0])
@@ -179,6 +180,8 @@ class NetWithAdditionalHead(nn.Module):
 
         if frame_label.dim() == 2:
             frame_label = frame_label.unsqueeze(0)
+        if audio_label.dim() == 1:
+            audio_label = audio_label.unsqueeze(0)
 
         # Converting audio to spectrograms
         # x = torch.rand(8,229, 640)
@@ -194,17 +197,23 @@ class NetWithAdditionalHead(nn.Module):
 
         # swap spec bins with timesteps so that it fits LSTM later
         spec = spec.transpose(-1, -2)  # shape (8,640,229)
-        if self.TOTAL_DEBUG:
-            copy_of_audio_batch = batch['audio'].clone().detach()
+        random_number = hash(random.getrandbits(128))
+        if(int(random_number) == 1464178761857848575):
+            self.WARNING_FLAG = True
+        if self.TOTAL_DEBUG and epoch_number != "evaluation" and self.WARNING_FLAG:
+            copy_of_audio_batch = audio_label.clone().detach()
             copy_of_spec_batch = spec.clone().detach()
-            copy_of_frame_batch = batch['frame'].clone().detach()
+            copy_of_frame_batch = frame_label.clone().detach()
             copy_of_path_batch = batch['path']
-            random_number = hash(random.getrandbits(128))
             spec_paths = [elem+"_spec.wav" for elem in copy_of_path_batch]
+            # if epoch_number == "evaluation":
+            #     print(f"EVAL SHAPES: audio {copy_of_audio_batch.shape}, spec {copy_of_spec_batch.shape}, label {copy_of_frame_batch.shape}")
+            # print(f"TRAIN SHAPES: audio {copy_of_audio_batch.shape}, spec {copy_of_spec_batch.shape}, label {copy_of_frame_batch.shape}")
             for i, spectrogram in enumerate(copy_of_spec_batch):
-                self.tensor_visualizer.save_general_audio_from_pytorch_tensor(copy_of_audio_batch[i], copy_of_path_batch[i], random_number)
-                self.tensor_visualizer.save_image_from_pytorch_tensor(spectrogram, spec_paths[i], random_number)
-                self.tensor_visualizer.save_image_from_pytorch_tensor(copy_of_frame_batch[i], copy_of_path_batch[i], random_number)
+                self.tensor_visualizer.save_general_audio_from_pytorch_tensor(copy_of_audio_batch[i], copy_of_path_batch[i], random_number, str(epoch_number))
+                self.tensor_visualizer.save_image_from_pytorch_tensor(spectrogram, spec_paths[i], random_number, str(epoch_number))
+                self.tensor_visualizer.save_image_from_pytorch_tensor(copy_of_frame_batch[i], copy_of_path_batch[i], random_number, str(epoch_number))
+                self.tensor_visualizer.save_general_midi_from_pytorch_tensor(copy_of_frame_batch[i], copy_of_path_batch[i], random_number, str(epoch_number), "ground_truth_midi")
 
         if self.reconstruction:
             feat1, feat2, feat1b, reconstrut, pianoroll, pianoroll2 = self(
@@ -240,12 +249,22 @@ class NetWithAdditionalHead(nn.Module):
                 'frame': pianoroll,
                 'feat1': feat1
             }
+            if self.TOTAL_DEBUG and epoch_number != "evaluation" and self.WARNING_FLAG:
+                copy_of_pianoroll = pianoroll.clone().detach()
+                pred_paths = [elem+"_predictrion.png" for elem in copy_of_path_batch]
+                for i, path in enumerate(pred_paths):
+                    self.tensor_visualizer.save_image_from_pytorch_tensor(copy_of_pianoroll[i], path, random_number, str(epoch_number))
+                    self.tensor_visualizer.save_general_midi_from_pytorch_tensor(copy_of_pianoroll[i], path, random_number, str(epoch_number), "predicted_midi")
+
             if self.conv_head:
                 predictions['feat_conv'] = feat_conv
             losses = {
                 'loss/transcription': F.binary_cross_entropy(predictions['frame'].squeeze(1), frame_label)
             }
-
+            if self.TOTAL_DEBUG and epoch_number != "evaluation" and self.WARNING_FLAG:
+                loss = sum(losses.values())
+                if(loss > 0.05):
+                    print(f"ALERT FOR {random_number} BATCH!")
             return predictions, losses, spec
 
     def freeze_all_layers(self):
