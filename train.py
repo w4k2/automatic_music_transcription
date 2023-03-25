@@ -38,8 +38,6 @@ def seed_everything(seed: int):
     torch.backends.cudnn.benchmark = False
 
 
-# set random seed for whole experiment
-seed_everything(35)
 # parameters for the network
 ds_ksize, ds_stride = (2, 2), (2, 2)
 mode = 'imagewise'
@@ -86,6 +84,9 @@ def config():
 
     validation_length = sequence_length
     refresh = False
+    # set random seed for whole experiment
+    seed = 33
+    seed_everything(seed)
 
     destination_dir = "runs"
     logdir = f'{destination_dir}/TRAIN_TRANSCRIPTION_{model_type}_ON_{train_on}_{spec}_{mode}_' + \
@@ -163,7 +164,7 @@ def train(spec, resume_iteration, train_on, pretrained_model_path, freeze_all_la
     if resume_iteration is None:
         ModelClass = create_model(model_type)
         model = ModelClass(ds_ksize=ds_ksize, ds_stride=ds_stride, reconstruction=reconstruction, mode=mode,
-                           spec=spec, norm=sparsity, device=device, linear_head=linear_head, conv_head=conv_head)
+                           spec=spec, norm=sparsity, device=device, linear_head=linear_head, conv_head=conv_head, TOTAL_DEBUG=TOTAL_DEBUG, logdir=logdir)
         model.to(device)
         if pretrained_model_path != None:
             pretrained_model_path = pretrained_model_path
@@ -197,7 +198,8 @@ def train(spec, resume_iteration, train_on, pretrained_model_path, freeze_all_la
 
     # loop = tqdm(range(resume_iteration + 1, iterations + 1))
     total_batch = len(loader.dataset)
-
+    # TO REPRODUCE:
+    # python train.py with train_on=SynthesizedInstruments model_type=unet seed=33 pretrained_model_path=runs/TRAIN_TRANSCRIPTION_unet_ON_SynthesizedInstruments_CQT_imagewise_230324-203352/model-350.pt
     for ep in range(1, epoches+1):
         model.train()
         total_loss = 0

@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+import random
 from nnAudio import Spectrogram
 from .constants import *
 from .Unet_blocks import *
@@ -9,12 +10,13 @@ import sys
 from .normalization import Normalization
 from torchvision.models import resnet18
 from .instrument_recognition_model import create_spectrogram_function
+from .tensor_visualizer import TensorVisualizer
 
 batchNorm_momentum = 0.1
 num_instruments = 1
 
 class ResnetTranscriptionModel(nn.Module):
-    def __init__(self, ds_ksize, ds_stride, log=True, reconstruction=True, mode='framewise', spec='CQT', norm=1, device='cpu',  linear_head=True, conv_head=False):
+    def __init__(self, ds_ksize, ds_stride, log=True, reconstruction=True, mode='framewise', spec='CQT', norm=1, device='cpu',  linear_head=True, conv_head=False, TOTAL_DEBUG=False, logdir="./runs"):
         super(ResnetTranscriptionModel, self).__init__()
         self.spectrogram = create_spectrogram_function(spec)
         self.conv = torch.nn.Conv2d(1, 3, (1, 1))
@@ -73,8 +75,10 @@ class ResnetTranscriptionModel(nn.Module):
         print("Unfreezing layers is not implemented yet")
 
 class NetWithAdditionalHead(nn.Module):
-    def __init__(self, ds_ksize, ds_stride, log=True, reconstruction=True, mode='framewise', spec='CQT', norm=1, device='cpu',  linear_head=True, conv_head=False):
+    def __init__(self, ds_ksize, ds_stride, log=True, reconstruction=True, mode='framewise', spec='CQT', norm=1, device='cpu',  linear_head=True, conv_head=False, TOTAL_DEBUG=False, logdir="./runs"):
         super(NetWithAdditionalHead, self).__init__()
+        self.TOTAL_DEBUG = TOTAL_DEBUG
+        self.tensor_visualizer = TensorVisualizer(logdir)
         global N_BINS  # using the N_BINS parameter from constant.py
 
         # Selecting the type of spectrogram to use
@@ -190,6 +194,17 @@ class NetWithAdditionalHead(nn.Module):
 
         # swap spec bins with timesteps so that it fits LSTM later
         spec = spec.transpose(-1, -2)  # shape (8,640,229)
+        if self.TOTAL_DEBUG:
+            copy_of_audio_batch = batch['audio'].clone().detach()
+            copy_of_spec_batch = spec.clone().detach()
+            copy_of_frame_batch = batch['frame'].clone().detach()
+            copy_of_path_batch = batch['path']
+            random_number = hash(random.getrandbits(128))
+            spec_paths = [elem+"_spec.wav" for elem in copy_of_path_batch]
+            for i, spectrogram in enumerate(copy_of_spec_batch):
+                self.tensor_visualizer.save_general_audio_from_pytorch_tensor(copy_of_audio_batch[i], copy_of_path_batch[i], random_number)
+                self.tensor_visualizer.save_image_from_pytorch_tensor(spectrogram, spec_paths[i], random_number)
+                self.tensor_visualizer.save_image_from_pytorch_tensor(copy_of_frame_batch[i], copy_of_path_batch[i], random_number)
 
         if self.reconstruction:
             feat1, feat2, feat1b, reconstrut, pianoroll, pianoroll2 = self(

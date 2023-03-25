@@ -43,10 +43,17 @@ class PianoRollAudioDataset(Dataset):
     def __getitem__(self, index):
         data = self.data[index]
         result = dict(path=data['path'])
-
+        if self.TOTAL_DEBUG:
+            copy_of_audio = data['audio'].clone().detach()
+            copy_of_frame = data['label'].clone().detach()
+            self.tensor_visualizer.save_audio_from_pytorch_tensor(copy_of_audio, result['path'], index)
+            self.tensor_visualizer.save_pianoroll_from_pytorch_tensor(copy_of_frame, result['path'], index)
         if self.sequence_length is not None:
             audio_length = len(data['audio'])
             label_length = len(data['label'])
+
+            # if audio_length != label_length:
+            #     print(f"path: {result['path']}, audio length: {audio_length}, label_length: {label_length}")
             if audio_length < self.sequence_length:
                 destined_steps = self.sequence_length // HOP_LENGTH
                 number_of_missing_audio = self.sequence_length // audio_length
@@ -79,7 +86,8 @@ class PianoRollAudioDataset(Dataset):
 
                 begin = step_begin * HOP_LENGTH
                 end = begin + self.sequence_length
-
+                original_steps = audio_length // HOP_LENGTH
+                #print(f"BLAX: original_steps: {original_steps}, desired_steps: {n_steps}, step_begin: {step_begin}, step_end: {step_end}, begin: {begin}, end: {end}")
                 result['audio'] = data['audio'][begin:end].to(self.device)
                 result['label'] = data['label'][step_begin:step_end, :].to(
                     self.device)
@@ -97,7 +105,7 @@ class PianoRollAudioDataset(Dataset):
         result['offset'] = (result['label'] == 1).to(self.device).float()
         result['frame'] = (result['label'] > 1).to(self.device).float()
         result['velocity'] = result['velocity'].to(self.device).float()
-        if self.TOTAL_DEBUG:
+        if self.TOTAL_DEBUG and False:
             copy_of_audio = result['audio'].clone().detach()
             copy_of_frame = result['frame'].clone().detach()
             self.tensor_visualizer.save_audio_from_pytorch_tensor(copy_of_audio, result['path'], index)
@@ -164,10 +172,14 @@ class PianoRollAudioDataset(Dataset):
         label = torch.zeros(n_steps, n_keys, dtype=torch.uint8)
         velocity = torch.zeros(n_steps, n_keys, dtype=torch.uint8)
 
-        tsv_path = tsv_path
-        midi = np.loadtxt(tsv_path, delimiter='\t', skiprows=1)
-        if not isinstance(midi[0], np.ndarray):
-            midi = [midi]
+        #if label extension is tsv
+        if(tsv_path.split(".")[-1] == "tsv"):
+            midi = np.loadtxt(tsv_path, delimiter='\t', skiprows=1)
+            # if not isinstance(midi[0], np.ndarray):
+            #     midi = [midi]
+        else:
+            #try with loading midi
+            midi = parse_midi(tsv_path)
 
 
         for onset, offset, note, vel in midi:
@@ -310,6 +322,21 @@ def find_unique_elements_for_lists(list1, list2):
             list2_unique_elements.append(element)
     return list1_unique_elements, list2_unique_elements
 
+def extract_opus(filename):
+    opus = os.path.basename(filename).split(".")[0]
+    if "_hex" in opus:
+        opus=opus[:-4]
+    return opus
+
+def find_label_for_given_wav(path, wav_filename):
+    opus = extract_opus(wav_filename)
+    list_of_labels = glob(f"{path}**/*{opus}*")
+    if len(list_of_labels):
+        return list_of_labels[0]
+    else:
+        return None
+
+
 class SynthesizedInstruments(PianoRollAudioDataset):
 
     def __init__(self, dataset_root_dir=".",  path='data/synthesize', groups=None, sequence_length=None, seed=42, refresh=False, device='cpu', TOTAL_DEBUG=False, logdir="runs/logdir"):
@@ -323,21 +350,25 @@ class SynthesizedInstruments(PianoRollAudioDataset):
     def files(self, group):
         # flacs = sorted(glob(os.path.join(self.path, "audio", '*solo*.wav')))
         # midis = sorted(glob(os.path.join(self.path, "labels", '*solo*.jams.mid')))
-        flacs = []
-        midis = []
+        wavs = []
+        labels = []
         if group in self.available_groups():
             for paths in glob(self.path+"*"):
                 print(f"Adding instrument from {paths} to {group}")
-                flacs += sorted(
+                found_wavs = sorted(
                     glob(os.path.join(paths, group, "audio", '*.wav')))
-                midis += sorted(
-                    glob(os.path.join(paths, group, "labels", '*.mid')))
-                midis.extend(sorted(
-                    glob(os.path.join(paths, group, "labels", '*.tsv'))))
-                if len(flacs) != len(midis):
+                for wav in found_wavs:
+                    label = find_label_for_given_wav(os.path.join(paths, group, "labels"), wav)
+                    if label == None:
+                        print(f"Warning - couldn't find corresponding label for file {wav}")
+                        assert(False)
+                    else:
+                        labels.append(label)
+                        wavs.append(wav)
 
-                    set_flacs_without_extension = sorted([element.split("/")[-1].split(".")[0].replace("_hex", "") for element in flacs])
-                    set_midis_without_extension = sorted([element.split("/")[-1].split(".")[0] for element in midis])
+                if len(wavs) != len(labels):
+                    set_flacs_without_extension = sorted([element.split("/")[-1].split(".")[0].replace("_hex", "") for element in wavs])
+                    set_midis_without_extension = sorted([element.split("/")[-1].split(".")[0] for element in wavs])
                     print(f"###### DEBUG: audio files list: {set_flacs_without_extension} \n")
                     print(f"###### DEBUG: labels list: {set_midis_without_extension} \n")
                     print(f"###### DEBUG: lists sizes: audio: {len(set_flacs_without_extension)}, label: {len(set_midis_without_extension)} \n")
@@ -345,24 +376,18 @@ class SynthesizedInstruments(PianoRollAudioDataset):
                     print(f"###### DEBUG: audio unique size {len(audio_unique)} label unique size: {len(label_unique)}")
                     print(f"###### DEBUG: audio unique: {audio_unique} \n")
                     print(f"###### DEBUG: label unique: {label_unique} \n")
-                    raise RuntimeError(f'Detected {len(midis)} labels for {len(flacs)} audio files!')
-            files = list(zip(flacs, midis))
-            print(f"Number of audio samples: {len(flacs)}, Number of labels: {len(midis)}")
+                    raise RuntimeError(f'Detected {len(labels)} labels for {len(wavs)} audio files!')
+            files = list(zip(wavs, labels))
+            print(f"Number of audio samples: {len(wavs)}, Number of labels: {len(labels)}")
         if len(files) == 0:
             raise RuntimeError(f'Group {group} is empty')
 
         result = []
         for audio_path, midi_path in files:
-            if(os.path.exists(midi_path) and midi_path[-4:] == ".tsv"):
-                result.append((audio_path, midi_path))
-            else: #if element is mid
-                tsv_filename = midi_path[-4]+".tsv"
-                if not os.path.exists(tsv_filename):
-                    midi = parse_midi(midi_path)
-                    np.savetxt(tsv_filename, midi, fmt='%.6f', delimiter='\t',
-                            header='onset,offset,note,velocity')
-                    os.remove(midi_path)
-                result.append((audio_path, tsv_filename))
+            audio_opus = extract_opus(audio_path)
+            midi_opus = extract_opus(midi_path)
+            assert audio_opus == midi_opus
+            result.append((audio_path, midi_path))
         return result
 
 
