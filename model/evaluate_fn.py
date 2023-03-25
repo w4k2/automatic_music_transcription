@@ -65,7 +65,7 @@ def evaluate_classification(data_loader, model: InstrumentRecognitionModel, batc
     return metrics
 
 
-def evaluate_wo_velocity(data, model, onset_threshold=0.5, frame_threshold=0.5, save_path=None, reconstruction=True):
+def evaluate_wo_velocity(data, model, onset_threshold=0.5, frame_threshold=0.5, save_path=None):
     metrics = defaultdict(list)
 
     for label in data:
@@ -128,42 +128,6 @@ def evaluate_wo_velocity(data, model, onset_threshold=0.5, frame_threshold=0.5, 
         avp = average_precision_score(label['frame'].cpu().detach(
         ).flatten(), pred['frame'].cpu().detach().flatten())
         metrics['metric/MusicNet/micro_avg_P'].append(avp)
-
-        if reconstruction:
-            p_est2, i_est2 = extract_notes_wo_velocity(
-                pred['onset2'], pred['frame2'], onset_threshold, frame_threshold)
-            t_est2, f_est2 = notes_to_frames(
-                p_est2, i_est2, pred['frame2'].shape)
-
-            i_est2 = (i_est2 * scaling).reshape(-1, 2)
-            p_est2 = np.array([midi_to_hz(MIN_MIDI + midi) for midi in p_est2])
-
-            t_est2 = t_est2.astype(np.float64) * scaling
-            f_est2 = [np.array([midi_to_hz(MIN_MIDI + midi)
-                               for midi in freqs]) for freqs in f_est2]
-
-            p2, r2, f2, o2 = evaluate_notes(
-                i_ref, p_ref, i_est2, p_est2, offset_ratio=None)
-            metrics['metric/note/precision_2'].append(p2)
-            metrics['metric/note/recall_2'].append(r2)
-            metrics['metric/note/f1_2'].append(f2)
-            metrics['metric/note/overlap_2'].append(o2)
-
-            frame_metrics2 = evaluate_frames(t_ref, f_ref, t_est2, f_est2)
-            frame_metrics['Precision_2'] = frame_metrics2['Precision']
-            frame_metrics['Recall_2'] = frame_metrics2['Recall']
-            frame_metrics['accuracy_2'] = frame_metrics2['Accuracy']
-            metrics['metric/frame/f1_2'].append(hmean(
-                [frame_metrics['Precision_2'] + eps, frame_metrics['Recall_2'] + eps]) - eps)
-            avp = average_precision_score(label['frame'].cpu().detach(
-            ).flatten(), pred['frame2'].cpu().detach().flatten())
-            metrics['metric/MusicNet/micro_avg_P2'].append(avp)
-
-            p2, r2, f2, o2 = evaluate_notes(i_ref, p_ref, i_est2, p_est2)
-            metrics['metric/note-with-offsets/precision_2'].append(p2)
-            metrics['metric/note-with-offsets/recall_2'].append(r2)
-            metrics['metric/note-with-offsets/f1_2'].append(f2)
-            metrics['metric/note-with-offsets/overlap_2'].append(o2)
 
         for key, loss in frame_metrics.items():
             metrics['metric/frame/' + key.lower().replace(' ', '_')

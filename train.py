@@ -50,9 +50,6 @@ def config():
     freeze_all_layers = False
     unfreeze_linear = False
     unfreeze_lstm = False
-    unfreeze_conv = False
-    conv_head = False
-    linear_head = True
 
     batch_size = 32
     sequence_length = 327680
@@ -67,7 +64,6 @@ def config():
     learning_rate_decay_steps = 10000
     learning_rate_decay_rate = 0.98
     model_type = "unet"
-    reconstruction=False
 
     leave_one_out = None
 
@@ -113,15 +109,14 @@ def create_model(model_type):
         return ResnetTranscriptionModel
     else: #fallback for unet
         print("Using unet transcription model")
-        return NetWithAdditionalHead
+        return UnetTranscriptionModel
 
 @ex.automain
 def train(spec, resume_iteration, train_on, pretrained_model_path, freeze_all_layers, unfreeze_linear, unfreeze_lstm,
-          unfreeze_conv, batch_size, sequence_length, learning_rate, learning_rate_decay_steps, learning_rate_decay_rate,
-          leave_one_out, clip_gradient_norm, validation_length, refresh, device, reconstruction, epoches, logdir, linear_head, conv_head,
+          batch_size, sequence_length, learning_rate, learning_rate_decay_steps, learning_rate_decay_rate,
+          leave_one_out, clip_gradient_norm, validation_length, refresh, device, epoches, logdir,
           dataset_root_dir, model_type, fail_observer):
     print_config(ex.current_run)
-    print("Reconstruction: ", reconstruction)
 
     dataset_data = create_transcription_datasets(dataset_type=train_on)
     TrainDataset = dataset_data[0][0]
@@ -148,8 +143,8 @@ def train(spec, resume_iteration, train_on, pretrained_model_path, freeze_all_la
 
     if resume_iteration is None:
         ModelClass = create_model(model_type)
-        model = ModelClass(ds_ksize=ds_ksize, ds_stride=ds_stride, reconstruction=reconstruction, mode=mode,
-                                      spec=spec, norm=sparsity, device=device, linear_head=linear_head, conv_head=conv_head)
+        model = ModelClass(ds_ksize=ds_ksize, ds_stride=ds_stride, mode=mode,
+                                      spec=spec, norm=sparsity, device=device)
         model.to(device)
         if pretrained_model_path != None:
             pretrained_model_path = pretrained_model_path
@@ -158,16 +153,20 @@ def train(spec, resume_iteration, train_on, pretrained_model_path, freeze_all_la
             model.load_my_state_dict(pretrained_model)
             optimizer = torch.optim.Adam(model.parameters(), learning_rate)
             detected_epoch = detect_epoch(pretrained_model_path)
-            optimizer.load_state_dict(torch.load(
-                os.path.join(os.path.dirname(pretrained_model_path), f'last-optimizer-state-{detected_epoch}.pt')))
+            try:
+                optimizer.load_state_dict(torch.load(
+                    os.path.join(os.path.dirname(pretrained_model_path), f'last-optimizer-state-{detected_epoch}.pt')))
+            except:
+                print("Cannot load optimizer! Probably model changed - new optimizer will be created")
+                optimizer = optimizer = torch.optim.Adam(model.parameters(), learning_rate)
         else:
             optimizer = torch.optim.Adam(model.parameters(), learning_rate)
             resume_iteration = 0
         if freeze_all_layers:
             model.freeze_all_layers()
-        if unfreeze_linear or unfreeze_lstm or unfreeze_conv:
+        if unfreeze_linear or unfreeze_lstm:
             model.unfreeze_selected_layers(
-                linear=unfreeze_linear, lstm=unfreeze_lstm, conv=unfreeze_conv)
+                linear=unfreeze_linear, lstm=unfreeze_lstm)
 
     else:  # Loading checkpoints and continue training
         trained_dir = 'trained_MAPS'  # Assume that the checkpoint is in this folder
@@ -224,7 +223,7 @@ def train(spec, resume_iteration, train_on, pretrained_model_path, freeze_all_la
         if (ep) % 10 == 0 and ep > 1:
             model.eval()
             with torch.no_grad():
-                for key, values in evaluate_wo_velocity(validation_dataset, model, reconstruction=reconstruction).items():
+                for key, values in evaluate_wo_velocity(validation_dataset, model).items():
                     if key.startswith('metric/'):
                         _, category, name = key.split('/')
                         print(
@@ -280,58 +279,12 @@ def train(spec, resume_iteration, train_on, pretrained_model_path, freeze_all_la
                     axs[idx].axis('off')
                 fig.tight_layout()
                 writer.add_figure('images/feat1', fig, ep)
-            if conv_head:
-                fig, axs = plt.subplots(2, 2, figsize=(24, 8))
-                axs = axs.flat
-                for idx, i in enumerate(predictions['feat_conv'].detach().cpu().numpy()):
-                    axs[idx].imshow(i[0].transpose(), cmap='jet',
-                                    origin='lower', vmax=1, vmin=0)
-                    axs[idx].axis('off')
-                fig.tight_layout()
-                writer.add_figure('images/feat_conv', fig, ep)
-
-            if reconstruction:
-                fig, axs = plt.subplots(2, 2, figsize=(24, 8))
-                axs = axs.flat
-                for idx, i in enumerate(predictions['feat2'].detach().cpu().numpy()):
-                    axs[idx].imshow(i.transpose(), cmap='jet',
-                                    origin='lower', vmax=1, vmin=0)
-                    axs[idx].axis('off')
-                fig.tight_layout()
-                writer.add_figure('images/feat2', fig, ep)
-
-                fig, axs = plt.subplots(2, 2, figsize=(24, 8))
-                axs = axs.flat
-                for idx, i in enumerate(predictions['feat1b'].detach().cpu().numpy()):
-                    axs[idx].imshow(i[0].transpose(), cmap='jet',
-                                    origin='lower', vmax=1, vmin=0)
-                    axs[idx].axis('off')
-                fig.tight_layout()
-                writer.add_figure('images/feat1b', fig, ep)
-
-                fig, axs = plt.subplots(2, 2, figsize=(24, 8))
-                axs = axs.flat
-                for idx, i in enumerate(predictions['reconstruction'].cpu().detach().numpy().squeeze(1)):
-                    axs[idx].imshow(i.transpose(), cmap='jet', origin='lower')
-                    axs[idx].axis('off')
-                fig.tight_layout()
-
-                writer.add_figure('images/Reconstruction', fig, ep)
-
-                fig, axs = plt.subplots(2, 2, figsize=(24, 4))
-                axs = axs.flat
-                for idx, i in enumerate(predictions['frame2'].detach().cpu().numpy()):
-                    axs[idx].imshow(
-                        i.transpose(), origin='lower', vmax=1, vmin=0)
-                    axs[idx].axis('off')
-                fig.tight_layout()
-                writer.add_figure('images/Transcription2', fig, ep)
 
     # Evaluating model performance on the full MAPS songs in the test split
     print('Training finished, now evaluating ')
     with torch.no_grad():
         model = model.eval()
-        metrics = evaluate_wo_velocity(tqdm(test_dataset), model, reconstruction=reconstruction,
+        metrics = evaluate_wo_velocity(tqdm(test_dataset), model,
                                        save_path=os.path.join(logdir, './MIDI_results'))
 
     for key, values in metrics.items():

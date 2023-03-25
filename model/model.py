@@ -14,7 +14,7 @@ batchNorm_momentum = 0.1
 num_instruments = 1
 
 class ResnetTranscriptionModel(nn.Module):
-    def __init__(self, ds_ksize, ds_stride, log=True, reconstruction=True, mode='framewise', spec='CQT', norm=1, device='cpu',  linear_head=True, conv_head=False):
+    def __init__(self, ds_ksize, ds_stride, log=True, mode='framewise', spec='CQT', norm=1, device='cpu'):
         super(ResnetTranscriptionModel, self).__init__()
         self.spectrogram = create_spectrogram_function(spec)
         self.conv = torch.nn.Conv2d(1, 3, (1, 1))
@@ -72,12 +72,10 @@ class ResnetTranscriptionModel(nn.Module):
     def unfreeze_selected_layers(self, linear=False, lstm=False, conv=False):
         print("Unfreezing layers is not implemented yet")
 
-class NetWithAdditionalHead(nn.Module):
-    def __init__(self, ds_ksize, ds_stride, log=True, reconstruction=True, mode='framewise', spec='CQT', norm=1, device='cpu',  linear_head=True, conv_head=False):
-        super(NetWithAdditionalHead, self).__init__()
-        global N_BINS  # using the N_BINS parameter from constant.py
-
-        # Selecting the type of spectrogram to use
+class UnetTranscriptionModel(nn.Module):
+    def __init__(self, ds_ksize, ds_stride, log=True, mode='framewise', spec='CQT', norm=1, device='cpu'):
+        super(UnetTranscriptionModel, self).__init__()
+        global N_BINS
         if spec == 'CQT':
             r = 2
             N_BINS = 88*r
@@ -94,27 +92,12 @@ class NetWithAdditionalHead(nn.Module):
         self.log = log
         self.normalize = Normalization(mode)
         self.norm = norm
-        self.reconstruction = reconstruction
-        self.conv_head = conv_head
-        self.linear_head = linear_head
 
         self.Unet1_encoder = Encoder(ds_ksize, ds_stride)
         self.Unet1_decoder = Decoder(ds_ksize, ds_stride)
-        self.conv2d_1 = torch.nn.Conv2d(1, N_BINS, (5, 5))
-        self.conv2d_2 = torch.nn.Conv2d(N_BINS, N_BINS*2, (3, 3))
-        self.transpose_conv1 = torch.nn.ConvTranspose2d(
-            N_BINS*2, N_BINS, (3, 3))
-        self.transpose_conv2 = torch.nn.ConvTranspose2d(N_BINS, 1, (5, 5))
         self.lstm1 = nn.LSTM(
             N_BINS, N_BINS, batch_first=True, bidirectional=True)
 
-        if reconstruction == True:
-            self.Unet2_encoder = Encoder(ds_ksize, ds_stride)
-            self.Unet2_decoder = Decoder(ds_ksize, ds_stride)
-            self.lstm2 = nn.LSTM(
-                88, N_BINS, batch_first=True, bidirectional=True)
-            self.linear2 = nn.Linear(N_BINS*2, N_BINS)
-        self.linear1 = nn.Linear(N_BINS*2, 88)
         self.head = torch.nn.Sequential(
             torch.nn.Linear(N_BINS*2, 500),
             torch.nn.ReLU(inplace=True),
@@ -126,129 +109,52 @@ class NetWithAdditionalHead(nn.Module):
         )
 
     def forward(self, x):
-        # U-net 1
         x, s, c = self.Unet1_encoder(x)
         feat1 = self.Unet1_decoder(x, s, c)
-        if self.conv_head:
-            x = self.conv2d_1(feat1)
-            x = self.conv2d_2(x)
-            x = self.transpose_conv1(x)
-            feat_conv = self.transpose_conv2(x)
-            x, h = self.lstm1(feat_conv.squeeze(1))  # remove the channel dim
-        else:
-            x, h = self.lstm1(feat1.squeeze(1))
-        if self.linear_head:
-            head_result = self.head(x)
-        else:
-            head_result = self.linear1(x)
-        pianoroll = torch.sigmoid(head_result)  # Use the full LSTM output
-
-        if self.reconstruction:
-            # U-net 2
-            x, h = self.lstm2(pianoroll)
-            # ToDo, remove the sigmoid activation and see if we get a better result
-            feat2 = torch.sigmoid(self.linear2(x))
-            x, s, c = self.Unet2_encoder(feat2.unsqueeze(1))
-            reconstruction = self.Unet2_decoder(x, s, c)  # predict roll
-
-            # Applying U-net 1 to the reconstructed spectrograms
-            x, s, c = self.Unet1_encoder(reconstruction)
-            feat1b = self.Unet1_decoder(x, s, c)
-            x, h = self.lstm1(feat1b.squeeze(1))  # remove the channel dim
-            # Use the full LSTM output
-            pianoroll2 = torch.sigmoid(self.linear1(x))
-
-            return feat1, feat2, feat1b, reconstruction, pianoroll, pianoroll2
-        else:
-            if self.conv_head:
-                return feat1, feat_conv, pianoroll
-            #print(f"BLAX unet feat1 shape {feat1.shape}")
-            return feat1, pianoroll
+        x, h = self.lstm1(feat1.squeeze(1))
+        head_result = self.head(x)
+        pianoroll = torch.sigmoid(head_result)
+        return feat1, pianoroll
 
     def run_on_batch(self, batch):
         audio_label = batch['audio']
-        onset_label = batch['onset']
         frame_label = batch['frame']
-        # print(audio_label[0])
-        # print(frame_label[0])
-        # assert False
 
         if frame_label.dim() == 2:
             frame_label = frame_label.unsqueeze(0)
 
-        # Converting audio to spectrograms
-        # x = torch.rand(8,229, 640)
         spec = self.spectrogram(
             audio_label.reshape(-1, audio_label.shape[-1])[:, :-1])
 
-        # log compression
         if self.log:
             spec = torch.log(spec + 1e-5)
 
-        # Normalizing spectrograms
         spec = self.normalize.transform(spec)
+        spec = spec.transpose(-1, -2)
 
-        # swap spec bins with timesteps so that it fits LSTM later
-        spec = spec.transpose(-1, -2)  # shape (8,640,229)
+        feat1, pianoroll = self(
+            spec.view(spec.size(0), 1, spec.size(1), spec.size(2)))
 
-        if self.reconstruction:
-            feat1, feat2, feat1b, reconstrut, pianoroll, pianoroll2 = self(
-                spec.view(spec.size(0), 1, spec.size(1), spec.size(2)))
-            predictions = {
-                'onset': pianoroll,
-                'frame': pianoroll,
-                'frame2': pianoroll2,
-                'onset2': pianoroll2,
-                'reconstruction': reconstrut,
-                'feat1': feat1,
-                'feat2': feat2,
-                'feat1b': feat1b
-            }
-            losses = {
-                'loss/reconstruction': F.mse_loss(reconstrut.squeeze(1), spec.detach()),
-                'loss/transcription': F.binary_cross_entropy(predictions['frame'].squeeze(1), frame_label),
-                'loss/transcription2': F.binary_cross_entropy(predictions['frame2'].squeeze(1), frame_label)
-            }
+        predictions = {
+            'onset': pianoroll,
+            'frame': pianoroll,
+            'feat1': feat1
+        }
+        losses = {
+            'loss/transcription': F.binary_cross_entropy(predictions['frame'].squeeze(1), frame_label)
+        }
 
-            return predictions, losses, spec
-
-        else:
-            if self.conv_head:
-                feat1, feat_conv, pianoroll = self(
-                    spec.view(spec.size(0), 1, spec.size(1), spec.size(2)))
-            else:
-                feat1, pianoroll = self(
-                    spec.view(spec.size(0), 1, spec.size(1), spec.size(2)))
-
-            predictions = {
-                'onset': pianoroll,
-                'frame': pianoroll,
-                'feat1': feat1
-            }
-            if self.conv_head:
-                predictions['feat_conv'] = feat_conv
-            losses = {
-                'loss/transcription': F.binary_cross_entropy(predictions['frame'].squeeze(1), frame_label)
-            }
-
-            return predictions, losses, spec
+        return predictions, losses, spec
 
     def freeze_all_layers(self):
         print("Freezing all layers of the model")
         for param in self.parameters():
             param.requires_grad = False
-        # print("BEFORE")
-        # for i, param in enumerate(self.parameters()):
-        #     if(param.requires_grad == True):
-        #         print(i)
         self.Unet1_encoder.unfreeze_batch_norm()
         self.Unet1_decoder.unfreeze_batch_norm()
-        # print("AFTER")
-        # for i, param in enumerate(self.parameters()):
-        #     if(param.requires_grad == True):
-        #         print(i)
 
-    def unfreeze_selected_layers(self, linear=False, lstm=False, conv=False):
+
+    def unfreeze_selected_layers(self, linear=False, lstm=False):
         if linear:
             print("Unfreezing head linear layer of the model!")
             self.head[0].weight.requires_grad = True
@@ -269,12 +175,6 @@ class NetWithAdditionalHead(nn.Module):
             self.lstm1.weight_hh_l0_reverse.requires_grad = True
             self.lstm1.bias_ih_l0_reverse.requires_grad = True
             self.lstm1.bias_hh_l0_reverse.requires_grad = True
-        if conv:
-            print("Unfreezing Conv layers!")
-            unfreeze_conv_layer(self.conv2d_1)
-            unfreeze_conv_layer(self.conv2d_2)
-            unfreeze_conv_layer(self.transpose_conv1)
-            unfreeze_conv_layer(self.transpose_conv2)
 
     def load_my_state_dict(self, state_dict):
         """Useful when loading part of the weights. From https://discuss.pytorch.org/t/how-to-load-part-of-pre-trained-model/1113/2"""
@@ -283,13 +183,8 @@ class NetWithAdditionalHead(nn.Module):
             if name not in own_state:
                 continue
             if isinstance(param, nn.Parameter):
-                # backwards compatibility for serialized parameters
                 param = param.data
             own_state[name].copy_(param)
             print("Copied ", name, " parameter to target network!")
             i = 0
 
-
-def unfreeze_conv_layer(layer):
-    layer.weight.requires_grad = True
-    layer.bias.requires_grad = True

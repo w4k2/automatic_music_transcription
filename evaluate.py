@@ -59,16 +59,13 @@ def config():
     dataset = 'MAPS'
     logdir = os.path.join(destination_dir, f"VALIDATION_ON_{dataset}_OF_"+weight_file.split("/")[-2])
     device = 'cuda:0'
-    reconstruction = False
-    conv_head = False
-    linear_head = True
     dataset_root_dir = "."
     leave_one_out = None
     refresh = False
 
 
 @ex.automain
-def evaluate(spec, dataset, device, reconstruction, logdir, leave_one_out, weight_file, conv_head, linear_head, dataset_root_dir, refresh):
+def evaluate(spec, dataset, device, logdir, leave_one_out, weight_file, dataset_root_dir, refresh):
     print_config(ex.current_run)
     dataset_data = create_transcription_datasets(dataset_type=dataset)
     TestDataset = dataset_data[2][0]
@@ -78,8 +75,8 @@ def evaluate(spec, dataset, device, reconstruction, logdir, leave_one_out, weigh
                                      sequence_length=327680, device=device, refresh=refresh)
 
 
-    model = NetWithAdditionalHead(ds_ksize, ds_stride, log=log, reconstruction=reconstruction,
-                                  mode=mode, spec=spec, norm=sparsity, linear_head=linear_head, conv_head=conv_head)
+    model = UnetTranscriptionModel(ds_ksize, ds_stride, log=log,
+                                  mode=mode, spec=spec, norm=sparsity)
     model.to(device)
     model_path = weight_file
     state_dict = torch.load(model_path)
@@ -89,7 +86,7 @@ def evaluate(spec, dataset, device, reconstruction, logdir, leave_one_out, weigh
 
     with torch.no_grad():
         model = model.eval()
-        metrics = evaluate_wo_velocity(tqdm(validation_dataset), model, reconstruction=reconstruction,
+        metrics = evaluate_wo_velocity(tqdm(validation_dataset), model,
                                        save_path=os.path.join(logdir, f'./{dataset}_MIDI_results'))
 
     for key, values in metrics.items():
