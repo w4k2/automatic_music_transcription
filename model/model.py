@@ -97,22 +97,13 @@ class UnetTranscriptionModel(nn.Module):
         self.Unet1_decoder = Decoder(ds_ksize, ds_stride)
         self.lstm1 = nn.LSTM(
             N_BINS, N_BINS, batch_first=True, bidirectional=True)
-
-        self.head = torch.nn.Sequential(
-            torch.nn.Linear(N_BINS*2, 500),
-            torch.nn.ReLU(inplace=True),
-            torch.nn.Linear(500, 500),
-            torch.nn.ReLU(inplace=True),
-            torch.nn.Linear(500, 500),
-            torch.nn.ReLU(inplace=True),
-            torch.nn.Linear(500, 88)
-        )
+        self.linear = nn.Linear(N_BINS*2, 88)
 
     def forward(self, x):
         x, s, c = self.Unet1_encoder(x)
         feat1 = self.Unet1_decoder(x, s, c)
         x, h = self.lstm1(feat1.squeeze(1))
-        head_result = self.head(x)
+        head_result = self.linear(x)
         pianoroll = torch.sigmoid(head_result)
         return feat1, pianoroll
 

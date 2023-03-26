@@ -7,16 +7,14 @@ import sys
 import pickle
 from matplotlib.style import available
 
-
 import numpy as np
 import soundfile
 from torch.utils.data import Dataset
 from tqdm import tqdm
 from .constants import *
 from .midi import parse_midi
+from .dataset_utils import *
 import librosa
-
-# torch.set_printoptions(profile="full")
 
 
 class PianoRollAudioDataset(Dataset):
@@ -160,9 +158,16 @@ class PianoRollAudioDataset(Dataset):
         midi = np.loadtxt(tsv_path, delimiter='\t', skiprows=1)
         if not isinstance(midi[0], np.ndarray):
             midi = [midi]
+        #if label extension is tsv
+        label_extension = tsv_path.split(".")[-1]
+        if label_extension == "tsv":
+            universal_pianoroll_representation = np.loadtxt(tsv_path, delimiter='\t', skiprows=1)
+            if not isinstance(universal_pianoroll_representation[0], np.ndarray):
+                universal_pianoroll_representation = [universal_pianoroll_representation]
+        elif label_extension == "mid" or label_extension == "midi":
+            universal_pianoroll_representation = parse_midi(tsv_path)
 
-
-        for onset, offset, note, vel in midi:
+        for onset, offset, note, vel in universal_pianoroll_representation:
             # Convert time to time step
             left = int(round(onset * SAMPLE_RATE / HOP_LENGTH))
             # Ensure the time step of onset would not exceed the last time step
@@ -291,17 +296,6 @@ class SynthesizedTrumpet(PianoRollAudioDataset):
             result.append((audio_path, tsv_filename))
         return result
 
-def find_unique_elements_for_lists(list1, list2):
-    list1_unique_elements = []
-    list2_unique_elements = []
-    for element in list1:
-        if element not in list2:
-            list1_unique_elements.append(element)
-    for element in list2:
-        if element not in list1:
-            list2_unique_elements.append(element)
-    return list1_unique_elements, list2_unique_elements
-
 class SynthesizedInstruments(PianoRollAudioDataset):
 
     def __init__(self, dataset_root_dir=".",  path='data/synthesize', groups=None, sequence_length=None, seed=42, refresh=False, device='cpu'):
@@ -315,47 +309,28 @@ class SynthesizedInstruments(PianoRollAudioDataset):
     def files(self, group):
         # flacs = sorted(glob(os.path.join(self.path, "audio", '*solo*.wav')))
         # midis = sorted(glob(os.path.join(self.path, "labels", '*solo*.jams.mid')))
-        flacs = []
-        midis = []
+        wavs = []
+        labels = []
         if group in self.available_groups():
             for paths in glob(self.path+"*"):
                 print(f"Adding instrument from {paths} to {group}")
-                flacs += sorted(
+                found_wavs += sorted(
                     glob(os.path.join(paths, group, "audio", '*.wav')))
-                midis += sorted(
-                    glob(os.path.join(paths, group, "labels", '*.mid')))
-                midis.extend(sorted(
-                    glob(os.path.join(paths, group, "labels", '*.tsv'))))
-                if len(flacs) != len(midis):
-
-                    set_flacs_without_extension = sorted([element.split("/")[-1].split(".")[0].replace("_hex", "") for element in flacs])
-                    set_midis_without_extension = sorted([element.split("/")[-1].split(".")[0] for element in midis])
-                    print(f"###### DEBUG: audio files list: {set_flacs_without_extension} \n")
-                    print(f"###### DEBUG: labels list: {set_midis_without_extension} \n")
-                    print(f"###### DEBUG: lists sizes: audio: {len(set_flacs_without_extension)}, label: {len(set_midis_without_extension)} \n")
-                    audio_unique, label_unique = find_unique_elements_for_lists(set_flacs_without_extension, set_midis_without_extension)
-                    print(f"###### DEBUG: audio unique size {len(audio_unique)} label unique size: {len(label_unique)}")
-                    print(f"###### DEBUG: audio unique: {audio_unique} \n")
-                    print(f"###### DEBUG: label unique: {label_unique} \n")
-                    raise RuntimeError(f'Detected {len(midis)} labels for {len(flacs)} audio files!')
-            files = list(zip(flacs, midis))
-            print(f"Number of audio samples: {len(flacs)}, Number of labels: {len(midis)}")
+                for wav in found_wavs:
+                    label = find_label_for_given_wav(os.path.join(paths, group, "labels"), wav)
+                    if label == None:
+                        print(f"Warning - couldn't find corresponding label for file {wav}")
+                        assert(False)
+                    else:
+                        labels.append(label)
+                        wavs.append(wav)
+                check_consistency_of_size_of_audio_and_labels(wavs, labels)
+            files = list(zip(wavs, labels))
+            print(f"Number of audio samples: {len(wavs)}, Number of labels: {len(labels)}")
         if len(files) == 0:
             raise RuntimeError(f'Group {group} is empty')
 
-        result = []
-        for audio_path, midi_path in files:
-            if(os.path.exists(midi_path) and midi_path[-4:] == ".tsv"):
-                result.append((audio_path, midi_path))
-            else: #if element is mid
-                tsv_filename = midi_path[-4]+".tsv"
-                if not os.path.exists(tsv_filename):
-                    midi = parse_midi(midi_path)
-                    np.savetxt(tsv_filename, midi, fmt='%.6f', delimiter='\t',
-                            header='onset,offset,note,velocity')
-                    os.remove(midi_path)
-                result.append((audio_path, tsv_filename))
-        return result
+        return prepare_list_of_tuples_with_audio_and_label_filenames(files)
 
 
 class MAPS(PianoRollAudioDataset):

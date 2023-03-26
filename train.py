@@ -38,8 +38,6 @@ def seed_everything(seed: int):
     torch.backends.cudnn.benchmark = False
 
 
-# set random seed for whole experiment
-seed_everything(33)
 # parameters for the network
 ds_ksize, ds_stride = (2, 2), (2, 2)
 mode = 'imagewise'
@@ -76,7 +74,8 @@ def config():
     model_type = "unet"
 
     leave_one_out = None
-
+    seed = 33 # set seed for whole experiment
+    seed_everything(33)
     clip_gradient_norm = 3
 
     validation_length = sequence_length

@@ -27,3 +27,4 @@ config.yaml
 .DS_Store
 *_runs/
 final*
+results*
