@@ -345,7 +345,7 @@ class MAPS(PianoRollAudioDataset):
         return ['AkPnBcht', 'AkPnBsdf', 'AkPnCGdD', 'AkPnStgb', 'ENSTDkAm', 'ENSTDkCl', 'SptkBGAm', 'SptkBGCl', 'StbgTGd2']
 
     def files(self, group):
-        flacs = glob(os.path.join(self.path, 'flac', '*_%s.flac' % group))
+        flacs = glob.glob(os.path.join(self.path, 'flac', '*_%s.flac' % group))
         if self.overlap == False:
             with open('overlapping.pkl', 'rb') as f:
                 test_names = pickle.load(f)
