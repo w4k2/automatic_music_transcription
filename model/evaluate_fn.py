@@ -69,7 +69,7 @@ def evaluate_wo_velocity(data, model, onset_threshold=0.5, frame_threshold=0.5, 
     metrics = defaultdict(list)
 
     for label in data:
-        pred, losses, _ = model.run_on_batch(label)
+        pred, losses, _ = model.run_on_batch(label, "evaluation")
 
         for key, loss in losses.items():
             metrics[key].append(loss.item())

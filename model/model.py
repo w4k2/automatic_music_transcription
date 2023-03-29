@@ -9,12 +9,15 @@ import sys
 from .normalization import Normalization
 from torchvision.models import resnet18
 from .instrument_recognition_model import create_spectrogram_function
+from .tensor_visualizer import TensorVisualizer
+import random
+
 
 batchNorm_momentum = 0.1
 num_instruments = 1
 
 class ResnetTranscriptionModel(nn.Module):
-    def __init__(self, ds_ksize, ds_stride, log=True, mode='framewise', spec='CQT', norm=1, device='cpu'):
+    def __init__(self, ds_ksize, ds_stride, log=True, mode='framewise', spec='CQT', norm=1, device='cpu', logdir='./runs'):
         super(ResnetTranscriptionModel, self).__init__()
         self.spectrogram = create_spectrogram_function(spec)
         self.conv = torch.nn.Conv2d(1, 3, (1, 1))
@@ -40,7 +43,7 @@ class ResnetTranscriptionModel(nn.Module):
         #print(f"feat resnet shape: {feat_resnet.shape}")
         return feat_resnet, transcription_result
 
-    def run_on_batch(self, batch):
+    def run_on_batch(self, batch, batch_description="training"):
         audio_label = batch['audio']
         onset_label = batch['onset']
         frame_label = batch['frame']
@@ -73,7 +76,7 @@ class ResnetTranscriptionModel(nn.Module):
         print("Unfreezing layers is not implemented yet")
 
 class UnetTranscriptionModel(nn.Module):
-    def __init__(self, ds_ksize, ds_stride, log=True, mode='framewise', spec='CQT', norm=1, device='cpu'):
+    def __init__(self, ds_ksize, ds_stride, mode='framewise', spec='CQT', norm=1, device='cpu', logdir='./runs', debug_mode = False):
         super(UnetTranscriptionModel, self).__init__()
         global N_BINS
         if spec == 'CQT':
@@ -88,11 +91,11 @@ class UnetTranscriptionModel(nn.Module):
                                                           trainable_mel=False, trainable_STFT=False)
         else:
             print(f'Please select a correct spectrogram')
-
-        self.log = log
+        self.tensor_visualizer = TensorVisualizer(logdir=logdir)
+        self.global_debug_mode = debug_mode
+        self.internal_debug_mode = False
         self.normalize = Normalization(mode)
         self.norm = norm
-
         self.Unet1_encoder = Encoder(ds_ksize, ds_stride)
         self.Unet1_decoder = Decoder(ds_ksize, ds_stride)
         self.lstm1 = nn.LSTM(
@@ -107,20 +110,25 @@ class UnetTranscriptionModel(nn.Module):
         pianoroll = torch.sigmoid(head_result)
         return feat1, pianoroll
 
-    def run_on_batch(self, batch):
+    def run_on_batch(self, batch, batch_description="training"):
+        global TOTAL_DEBUG_GLOBAL
         audio_label = batch['audio']
         frame_label = batch['frame']
 
+        #in case one dimensional input provided
         if frame_label.dim() == 2:
             frame_label = frame_label.unsqueeze(0)
+        if audio_label.dim() == 1:
+            audio_label = audio_label.unsqueeze(0)
 
         spec = self.spectrogram(
             audio_label.reshape(-1, audio_label.shape[-1])[:, :-1])
 
-        if self.log:
-            spec = torch.log(spec + 1e-5)
-
+        # log compression
+        spec = torch.log(spec + 1e-5)
+        # spectrogram normalization
         spec = self.normalize.transform(spec)
+        # swap axes for lstm
         spec = spec.transpose(-1, -2)
 
         feat1, pianoroll = self(
@@ -134,6 +142,29 @@ class UnetTranscriptionModel(nn.Module):
         losses = {
             'loss/transcription': F.binary_cross_entropy(predictions['frame'].squeeze(1), frame_label)
         }
+        batch_identifier = hash(random.getrandbits(64))
+        if self.global_debug_mode and batch_description != "evaluation" and int(batch_description) == 233:
+            print("Started to register batches when problem occurs!")
+            print(f"first batch: {batch_identifier}")
+            self.internal_debug_mode = True
+        if self.internal_debug_mode and batch_description != "evaluation":
+            copy_of_audio_batch = audio_label.clone().detach()
+            copy_of_spec_batch = spec.clone().detach()
+            copy_of_frame_batch = frame_label.clone().detach()
+            copy_of_path_batch = batch['path']
+            copy_of_pianoroll = pianoroll.clone().detach()
+            spec_paths = [elem+"_spec.wav" for elem in copy_of_path_batch]
+            pred_paths = [elem+"_predictrion.png" for elem in copy_of_path_batch]
+            # if epoch_number == "evaluation":
+            #     print(f"EVAL SHAPES: audio {copy_of_audio_batch.shape}, spec {copy_of_spec_batch.shape}, label {copy_of_frame_batch.shape}")
+            # print(f"TRAIN SHAPES: audio {copy_of_audio_batch.shape}, spec {copy_of_spec_batch.shape}, label {copy_of_frame_batch.shape}")
+            for i, spectrogram in enumerate(copy_of_spec_batch):
+                self.tensor_visualizer.save_general_audio_from_pytorch_tensor(copy_of_audio_batch[i], copy_of_path_batch[i], batch_identifier, str(batch_description))
+                self.tensor_visualizer.save_image_from_pytorch_tensor(spectrogram, spec_paths[i], batch_identifier, str(batch_description))
+                self.tensor_visualizer.save_image_from_pytorch_tensor(copy_of_frame_batch[i], copy_of_path_batch[i], batch_identifier, str(batch_description))
+                self.tensor_visualizer.save_general_midi_from_pytorch_tensor(copy_of_frame_batch[i], copy_of_path_batch[i], batch_identifier, str(batch_description), "ground_truth_midi")
+                self.tensor_visualizer.save_image_from_pytorch_tensor(copy_of_pianoroll[i], pred_paths[i], batch_identifier, str(batch_description))
+                self.tensor_visualizer.save_general_midi_from_pytorch_tensor(copy_of_pianoroll[i], pred_paths[i], batch_identifier, str(batch_description), "predicted_midi")
 
         return predictions, losses, spec
 

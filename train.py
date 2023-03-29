@@ -19,6 +19,7 @@ from tqdm import tqdm
 
 from fail_observer import FailObserver
 from model import *
+from model.constants import *
 from model.dataset import (OriginalMAPS, SynthesizedInstruments,
                            SynthesizedTrumpet)
 from model.evaluate_fn import evaluate_wo_velocity
@@ -43,7 +44,6 @@ ds_ksize, ds_stride = (2, 2), (2, 2)
 mode = 'imagewise'
 sparsity = 1
 
-
 @ex.config
 def config():
     # Choosing GPU to use
@@ -58,6 +58,7 @@ def config():
     freeze_all_layers = False
     unfreeze_linear = False
     unfreeze_lstm = False
+    debug_mode = False # caution - it does terrible things
 
     batch_size = 32
     sequence_length = 327680
@@ -128,9 +129,8 @@ def create_model(model_type):
 def train(spec, resume_iteration, train_on, pretrained_model_path, freeze_all_layers, unfreeze_linear, unfreeze_lstm,
           batch_size, sequence_length, learning_rate, learning_rate_decay_steps, learning_rate_decay_rate,
           leave_one_out, clip_gradient_norm, validation_length, refresh, device, epoches, logdir,
-          dataset_root_dir, model_type, fail_observer):
+          dataset_root_dir, model_type, fail_observer, debug_mode):
     print_config(ex.current_run)
-
     dataset_data = create_transcription_datasets(dataset_type=train_on)
     TrainDataset = dataset_data[0][0]
     train_dataset_groups = dataset_data[0][1]
@@ -156,7 +156,7 @@ def train(spec, resume_iteration, train_on, pretrained_model_path, freeze_all_la
     if resume_iteration is None:
         ModelClass = create_model(model_type)
         model = ModelClass(ds_ksize=ds_ksize, ds_stride=ds_stride, mode=mode,
-                                      spec=spec, norm=sparsity, device=device)
+                           spec=spec, norm=sparsity, device=device, logdir=logdir, debug_mode=debug_mode)
         model.to(device)
         if pretrained_model_path != None:
             pretrained_model_path = pretrained_model_path
@@ -201,7 +201,7 @@ def train(spec, resume_iteration, train_on, pretrained_model_path, freeze_all_la
         batch_idx = 0
         # print(f'ep = {ep}, lr = {scheduler.get_lr()}')
         for batch in loader:
-            predictions, losses, _ = model.run_on_batch(batch)
+            predictions, losses, _ = model.run_on_batch(batch, batch_description=str(ep))
             clip_grad_norm_(model.parameters(), clip_gradient_norm)
             loss = sum(losses.values())
             total_loss += loss.item()
@@ -253,7 +253,7 @@ def train(spec, resume_iteration, train_on, pretrained_model_path, freeze_all_la
 
         # Load one batch from validation_dataset
 
-        predictions, losses, mel = model.run_on_batch(batch_visualize)
+        predictions, losses, mel = model.run_on_batch(batch_visualize, "evaluation")
         if ep == 1:  # Showing the original transcription and spectrograms
             fig, axs = plt.subplots(2, 2, figsize=(24, 8))
             axs = axs.flat

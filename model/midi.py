@@ -91,6 +91,46 @@ def save_midi(path, pitches, intervals, velocities):
 
     file.save(path)
 
+def save_midi_new_version(path, pitches, intervals, velocities, debug="off"):
+    """
+    Save extracted notes as a MIDI file
+    Parameters
+    ----------
+    path: the path to save the MIDI file
+    pitches: np.ndarray of bin_indices
+    intervals: list of (onset_index, offset_index)
+    velocities: list of velocity values
+    """
+    file = MidiFile()
+    track = MidiTrack()
+    file.tracks.append(track)
+    ticks_per_second = file.ticks_per_beat * 0.05
+
+    events = []
+    for i in range(len(pitches)):
+        events.append(
+            dict(type='on', pitch=pitches[i], time=intervals[i][0], velocity=velocities[i]))
+        events.append(
+            dict(type='off', pitch=pitches[i], time=intervals[i][1], velocity=velocities[i]))
+    events.sort(key=lambda row: row['time'])
+
+    last_tick = 0
+    for event in events:
+        current_tick = int(event['time'] * ticks_per_second)
+        velocity = int(event['velocity'] * 127)
+        if velocity > 127:
+            velocity = 127
+        pitch = event['pitch']
+        if(debug=="on"):
+            print('note_' + event['type'])
+            print(pitch)
+            print(velocity)
+            print(current_tick - last_tick)
+        track.append(Message(
+            'note_' + event['type'], note=pitch, velocity=velocity, time=current_tick - last_tick))
+        last_tick = current_tick
+
+    file.save(path)
 
 if __name__ == '__main__':
 
@@ -114,3 +154,4 @@ if __name__ == '__main__':
 
     Parallel(n_jobs=multiprocessing.cpu_count())(delayed(process)
                                                  (in_file, out_file) for in_file, out_file in files())
+
