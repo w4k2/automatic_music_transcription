@@ -21,7 +21,7 @@ from fail_observer import FailObserver
 from model import *
 from model.constants import *
 from model.dataset import (OriginalMAPS, SynthesizedInstruments,
-                           SynthesizedTrumpet)
+                           SynthesizedTrumpet, CustomBatchDataset)
 from model.evaluate_fn import evaluate_wo_velocity
 from snapshot import Snapshot
 
@@ -81,6 +81,8 @@ def config():
 
     validation_length = sequence_length
     refresh = False
+    custom_batch = False
+    start_debug_epoch = 1
 
     destination_dir = "runs"
     logdir = f'{destination_dir}/TRAIN_TRANSCRIPTION_{model_type}_ON_{train_on}_{spec}_{mode}_' + \
@@ -94,6 +96,11 @@ def detect_epoch(filename):
     only_model_name = filename.split("/")[-1]
     return only_model_name[6:-3]
 
+def get_gradients(model):
+	grads = []
+	for params in model.parameters():
+		grads.append(torch.max(torch.abs(params.grad)).item())
+	return grads
 
 def create_transcription_datasets(dataset_type):
     if dataset_type == "MAESTRO":
@@ -124,12 +131,54 @@ def create_model(model_type):
         print("Using unet transcription model")
         return UnetTranscriptionModel
 
+def make_dir_if_does_not_exist(dirname):
+    if not os.path.exists(dirname):
+        os.makedirs(dirname)
+
+def save_4D_array_to_file(filename, array_to_be_saved):
+    for i, element in enumerate(array_to_be_saved):
+        if(array_to_be_saved.shape[1] == 1):
+            np.savetxt(filename+f"_{i}.txt", element[0])
+        else:
+            for j, subelement in enumerate(element):
+                np.savetxt(filename+f"_{i}_{j}.txt", subelement)
+def serialize_batch(batch, batch_idx, batch_saving_destination):
+        batch_audio = batch['audio'].clone().detach().cpu().numpy()
+        batch_frame = batch['frame'].clone().detach().cpu().numpy()
+        batch_path = np.asarray(batch['path'])
+        np.save(os.path.join(batch_saving_destination, f"batch_audio.npy"), batch_audio)
+        np.save(os.path.join(batch_saving_destination, f"batch_frame.npy"), batch_frame)
+        np.save(os.path.join(batch_saving_destination, f"batch_path.npy"), batch_path)
+
+def print_layers_names(model):
+    id = 0
+    for param, _ in model.named_parameters():
+        print(f"{id}: {param}")
+        id = id+1
+
+def save_batch(batch, logdir, ep, batch_idx):
+    batch_saving_destination = os.path.join(logdir, f"batch/{ep}/{batch_idx}/")
+    make_dir_if_does_not_exist(batch_saving_destination)
+    serialize_batch(batch, batch_idx, batch_saving_destination)
+
+def save_gradients(model, logdir, ep, batch_idx):
+    with torch.no_grad():
+        for idx, param in enumerate(model.parameters()):
+            if idx in [66,67,70,71,76,77,80,81,84,86,87,88,96,97,98,99]:
+                destination_dir = os.path.join(logdir, f"gradients/{ep}/{batch_idx}/layer_{idx}")
+                make_dir_if_does_not_exist(destination_dir)
+                detached_grad = param.grad.data.clone().detach().cpu().numpy()
+                basic_filename = os.path.join(destination_dir, "weight")
+                if(len(detached_grad.shape) == 4):
+                    save_4D_array_to_file(basic_filename, detached_grad)
+                else:
+                    np.savetxt(basic_filename+".txt", detached_grad)
 
 @ex.automain
 def train(spec, resume_iteration, train_on, pretrained_model_path, freeze_all_layers, unfreeze_linear, unfreeze_lstm,
           batch_size, sequence_length, learning_rate, learning_rate_decay_steps, learning_rate_decay_rate,
           leave_one_out, clip_gradient_norm, validation_length, refresh, device, epoches, logdir,
-          dataset_root_dir, model_type, fail_observer, debug_mode):
+          dataset_root_dir, model_type, fail_observer, debug_mode, custom_batch, start_debug_epoch):
     print_config(ex.current_run)
     dataset_data = create_transcription_datasets(dataset_type=train_on)
     TrainDataset = dataset_data[0][0]
@@ -138,16 +187,19 @@ def train(spec, resume_iteration, train_on, pretrained_model_path, freeze_all_la
     val_dataset_groups = dataset_data[1][1]
     TestDataset = dataset_data[2][0]
     test_dataset_groups = dataset_data[2][1]
-
-    train_dataset = TrainDataset(dataset_root_dir=dataset_root_dir, groups=train_dataset_groups,
+    if not custom_batch:
+        train_dataset = TrainDataset(dataset_root_dir=dataset_root_dir, groups=train_dataset_groups,
                                  sequence_length=sequence_length, device=device, refresh=refresh)
     # validation_dataset = MAESTRO(groups=validation_groups, sequence_length=sequence_length)
     validation_dataset = ValidationDataset(dataset_root_dir=dataset_root_dir, groups=val_dataset_groups,
                                            sequence_length=sequence_length, device=device, refresh=refresh)
     test_dataset = TestDataset(dataset_root_dir=dataset_root_dir, groups=test_dataset_groups,
                                sequence_length=sequence_length, device=device, refresh=refresh)
-
-    loader = DataLoader(train_dataset, batch_size, shuffle=True, drop_last=True)
+    if custom_batch:
+        loader = CustomBatchDataset(dataset_root_dir="results_monday/TRAIN_TRANSCRIPTION_unet_ON_MAPS_CQT_imagewise_230401-003349/batch", groups=train_dataset_groups,
+                                 sequence_length=sequence_length, device=device, refresh=refresh)
+    else:
+        loader = DataLoader(train_dataset, batch_size, shuffle=True, drop_last=True)
     valloader = DataLoader(validation_dataset, 4,
                            shuffle=False, drop_last=True)
     # Getting one fixed batch for visualization
@@ -189,6 +241,9 @@ def train(spec, resume_iteration, train_on, pretrained_model_path, freeze_all_la
             os.path.join(trained_dir, 'last-optimizer-state.pt')))
 
     summary(model)
+    if debug_mode:
+        print_layers_names(model)
+        torch.autograd.set_detect_anomaly(True)
     scheduler = StepLR(
         optimizer, step_size=learning_rate_decay_steps, gamma=learning_rate_decay_rate)
 
@@ -199,22 +254,28 @@ def train(spec, resume_iteration, train_on, pretrained_model_path, freeze_all_la
         model.train()
         total_loss = 0
         batch_idx = 0
+        if not model.internal_debug_mode and debug_mode and ep == start_debug_epoch:
+            print("Started to register batches when problem occurs!")
+            print(f"epoch: {ep}, first batch: {batch_idx}")
+            model.internal_debug_mode = True
         # print(f'ep = {ep}, lr = {scheduler.get_lr()}')
         for batch in loader:
-            predictions, losses, _ = model.run_on_batch(batch, batch_description=str(ep))
-            clip_grad_norm_(model.parameters(), clip_gradient_norm)
+            optimizer.zero_grad()
+            predictions, losses, _ = model.run_on_batch(batch, batch_description=str(ep), batch_identifier=batch_idx)
             loss = sum(losses.values())
             total_loss += loss.item()
-            optimizer.zero_grad()
             loss.backward()
+            nn.utils.clip_grad_value_(model.parameters(), clip_value=0.1)
+            if model.internal_debug_mode:
+                save_batch(batch, logdir, ep, batch_idx)
+                save_gradients(model, logdir, ep, batch_idx)
             optimizer.step()
             scheduler.step()
-
             batch_idx += 1
             print(f'Train Epoch: {ep} [{batch_idx*batch_size}/{total_batch}'
                   f'({100. * batch_idx*batch_size / total_batch:.0f}%)]'
-                  f'\tLoss: {loss.item():.6f}', end='\r')
-        print(' '*100, end='\r')
+                  f'\tLoss: {loss.item():.6f}')
+
         epoch_loss = total_loss/len(loader)
         print(f'Train Epoch: {ep}\tLoss: {epoch_loss:.6f}')
         fail_observer.snapshot.add_to_snapshot(ep,

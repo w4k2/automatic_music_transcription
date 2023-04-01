@@ -26,13 +26,29 @@ class block(nn.Module):
         self.bn1.weight.requires_grad = True
         self.bn2.weight.requires_grad = True
 
+def backward_hook_conv2d(module, grad_input, grad_output):
+    print('d_block.conv2d grad_input max:', torch.max(torch.abs(grad_input[0])).item())
+    print('d_block.conv2d grad_output max:', torch.max(torch.abs(grad_output[0])).item())
+
+def backward_hook_bn2d(module, grad_input, grad_output):
+    print('d_block.bn2d grad_input max:', torch.max(torch.abs(grad_input[0])).item())
+    print('d_block.bn2d grad_output max:', torch.max(torch.abs(grad_output[0])).item())
+
+def backward_hook_conv1d(module, grad_input, grad_output):
+    print('d_block.conv1d grad_input max:', torch.max(torch.abs(grad_input[0])).item())
+    print('d_block.conv1d grad_output max:', torch.max(torch.abs(grad_output[0])).item())
+
+
 class d_block(nn.Module):
     def __init__(self, inp, out, isLast, ksize, pad, ds_ksize, ds_stride):
         super(d_block, self).__init__()
         self.conv2d = nn.ConvTranspose2d(inp, int(inp/2), kernel_size=ksize, padding=pad)
+        #UNCOMMENT TO DEBUG GRADIENT EXPLODING PROBLEMS
+        #self.conv2d.register_full_backward_hook(backward_hook_conv2d)
         self.bn2d = nn.BatchNorm2d(int(inp/2), momentum= batchNorm_momentum)
+        #self.bn2d.register_full_backward_hook(backward_hook_bn2d)
         self.conv1d = nn.ConvTranspose2d(int(inp/2), out, kernel_size=ksize, padding=pad)
-        
+        #self.conv1d.register_full_backward_hook(backward_hook_conv1d)
         if not isLast: 
             self.bn1d = nn.BatchNorm2d(out, momentum= batchNorm_momentum)
             self.us = nn.ConvTranspose2d(inp-out, inp-out, kernel_size=ds_ksize, stride=ds_stride) 
@@ -43,7 +59,7 @@ class d_block(nn.Module):
         # print(f'x.shape={x.shape}')
         # print(f'target shape = {size}')
         x = self.us(x,output_size=size)
-        if not isLast: x = torch.cat((x, skip), 1) 
+        if not isLast: x = torch.cat((x, skip), 1)
         x = F.leaky_relu(self.bn2d(self.conv2d(x)))
         if isLast: x = self.conv1d(x)
         else:  x = F.leaky_relu(self.bn1d(self.conv1d(x)))
@@ -90,7 +106,6 @@ class Decoder(nn.Module):
         self.d_block2 = d_block(96,32,False,(3,3),(1,1),ds_ksize, ds_stride)
         self.d_block3 = d_block(48,16,False,(3,3),(1,1),ds_ksize, ds_stride)
         self.d_block4 = d_block(16,num_instruments,True,(3,3),(1,1),ds_ksize, ds_stride)
-            
 
             
     def forward(self, x, s, c=[None,None,None,None]):

@@ -43,7 +43,7 @@ class ResnetTranscriptionModel(nn.Module):
         #print(f"feat resnet shape: {feat_resnet.shape}")
         return feat_resnet, transcription_result
 
-    def run_on_batch(self, batch, batch_description="training"):
+    def run_on_batch(self, batch, batch_description="training", batch_identifier=0):
         audio_label = batch['audio']
         onset_label = batch['onset']
         frame_label = batch['frame']
@@ -75,6 +75,22 @@ class ResnetTranscriptionModel(nn.Module):
     def unfreeze_selected_layers(self, linear=False, lstm=False, conv=False):
         print("Unfreezing layers is not implemented yet")
 
+# this hook clip gradient after LSTM
+def backward_hook_lstm(module, grad_input, grad_output):
+    #print('LSTM grad_input max:', torch.max(torch.abs(grad_input[0])).item())
+    grad_input[0].clamp_(min=-0.001, max=0.001)
+    #print("LSTM grad input after clamp max: ", torch.max(torch.abs(grad_input[0])).item())
+    #print('LSTM grad_output max:', torch.max(torch.abs(grad_output[0])).item())
+    return grad_input
+
+#this hook clip gradients before LSTM
+def backward_hook_linear(module, grad_input, grad_output):
+    #print('Linear grad_input max :', torch.max(torch.abs(grad_input[0])).item())
+    grad_input[0].clamp_(min=-0.001, max=0.001)
+    #print('Linear grad_output max :', torch.max(torch.abs(grad_output[0])).item())
+    return grad_input
+
+
 class UnetTranscriptionModel(nn.Module):
     def __init__(self, ds_ksize, ds_stride, mode='framewise', spec='CQT', norm=1, device='cpu', logdir='./runs', debug_mode = False):
         super(UnetTranscriptionModel, self).__init__()
@@ -100,7 +116,9 @@ class UnetTranscriptionModel(nn.Module):
         self.Unet1_decoder = Decoder(ds_ksize, ds_stride)
         self.lstm1 = nn.LSTM(
             N_BINS, N_BINS, batch_first=True, bidirectional=True)
+        self.lstm1.register_full_backward_hook(backward_hook_lstm)
         self.linear = nn.Linear(N_BINS*2, 88)
+        self.linear.register_full_backward_hook(backward_hook_linear)
 
     def forward(self, x):
         x, s, c = self.Unet1_encoder(x)
@@ -110,8 +128,7 @@ class UnetTranscriptionModel(nn.Module):
         pianoroll = torch.sigmoid(head_result)
         return feat1, pianoroll
 
-    def run_on_batch(self, batch, batch_description="training"):
-        global TOTAL_DEBUG_GLOBAL
+    def run_on_batch(self, batch, batch_description="training", batch_identifier=0):
         audio_label = batch['audio']
         frame_label = batch['frame']
 
@@ -133,7 +150,6 @@ class UnetTranscriptionModel(nn.Module):
 
         feat1, pianoroll = self(
             spec.view(spec.size(0), 1, spec.size(1), spec.size(2)))
-
         predictions = {
             'onset': pianoroll,
             'frame': pianoroll,
@@ -142,11 +158,6 @@ class UnetTranscriptionModel(nn.Module):
         losses = {
             'loss/transcription': F.binary_cross_entropy(predictions['frame'].squeeze(1), frame_label)
         }
-        batch_identifier = hash(random.getrandbits(64))
-        if self.global_debug_mode and batch_description != "evaluation" and int(batch_description) == 233:
-            print("Started to register batches when problem occurs!")
-            print(f"first batch: {batch_identifier}")
-            self.internal_debug_mode = True
         if self.internal_debug_mode and batch_description != "evaluation":
             copy_of_audio_batch = audio_label.clone().detach()
             copy_of_spec_batch = spec.clone().detach()

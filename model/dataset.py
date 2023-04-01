@@ -247,9 +247,9 @@ class GuitarSet(PianoRollAudioDataset):
         # midis = sorted(glob(os.path.join(self.path, "labels", '*solo*.jams.mid')))
         if group in self.available_groups():
             flacs = sorted(
-                glob(os.path.join(self.path, group, "audio", '*.wav')))
+                glob.glob(os.path.join(self.path, group, "audio", '*.wav')))
             midis = sorted(
-                glob(os.path.join(self.path, group, "labels", '*.mid')))
+                glob.glob(os.path.join(self.path, group, "labels", '*.mid')))
             files = list(zip(flacs, midis))
         if len(files) == 0:
             raise RuntimeError(f'Group {group} is empty')
@@ -410,6 +410,41 @@ class OriginalMAPS(PianoRollAudioDataset):
                        header='onset,offset,note,velocity')
             result.append((audio_path, tsv_filename))
         return result
+
+class CustomBatchDataset(Dataset):
+    def __init__(self, dataset_root_dir=".", path='batch/', groups=None, sequence_length=None, seed=42, refresh=False, device='cpu'):
+        print(f"Loading {len(groups)} group{'s' if len(groups) > 1 else ''} "
+              f"of {self.__class__.__name__} at {path}")
+        self.device = device
+        directories_with_batch_data = glob.glob(os.path.join(dataset_root_dir, "*"))
+        self.data = []
+        for epoch_data in directories_with_batch_data:
+            directories_per_batch = glob.glob(os.path.join(epoch_data, "*"))
+            for directory in tqdm(directories_per_batch, desc=f"Loading batch from {epoch_data}"):
+                self.data.append(self.load(directory))
+        self.last_visited_index = 0
+        self.size = len(self.data)
+        self.dataset = self.data
+
+    @classmethod
+    def available_groups(cls):
+        return ['test']
+
+    def load(self, directory):
+        audio = np.load(os.path.join(directory, "batch_audio.npy"))
+        audio = torch.FloatTensor(audio).to(self.device).float()
+        frame = np.load(os.path.join(directory, "batch_frame.npy"))
+        frame = torch.ByteTensor(frame).to(self.device).float()
+        path = np.load(os.path.join(directory, "batch_path.npy")).tolist()
+        data = dict(path=path, audio=audio,
+                    frame=frame)
+        return data
+
+    def __iter__(self):
+        return iter(self.data)
+
+    def __len__(self) -> int:
+        return len(self.data)
 
 class MusicNet(PianoRollAudioDataset):
     def __init__(self, dataset_root_dir=".", path='MusicNet/', groups=None, sequence_length=None, seed=42, refresh=False, device='cpu'):
