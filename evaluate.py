@@ -75,8 +75,8 @@ def evaluate(spec, dataset, device, logdir, leave_one_out, weight_file, dataset_
                                      sequence_length=327680, device=device, refresh=refresh)
 
 
-    model = UnetTranscriptionModel(ds_ksize, ds_stride, log=log,
-                                  mode=mode, spec=spec, norm=sparsity)
+    model = UnetTranscriptionModel(ds_ksize, ds_stride,
+                                  mode=mode, spec=spec, norm=sparsity, logdir=logdir)
     model.to(device)
     model_path = weight_file
     state_dict = torch.load(model_path)

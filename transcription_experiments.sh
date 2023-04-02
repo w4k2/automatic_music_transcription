@@ -5,7 +5,7 @@ function evaluate_model {
     python evaluate.py with weight_file=$1 dataset=MAPS
     python evaluate.py with weight_file=$1 dataset=SynthesizedInstruments
 }
-epoches=2000
+epoches=1000
 seed=33
 #BASIC TRANSCRIPTION
 python train.py with train_on=MAPS logdir=results/unet_model_trained_on_MAPS model_type=unet epoches=$epoches seed=$seed

@@ -1,14 +1,10 @@
-from email.mime import audio
 import json
 import os
 from abc import abstractmethod
-from glob import glob
-import sys
+import glob
 import pickle
-from matplotlib.style import available
 
 import numpy as np
-import soundfile
 from torch.utils.data import Dataset
 from tqdm import tqdm
 from .constants import *
@@ -202,11 +198,11 @@ class MAESTRO(PianoRollAudioDataset):
     def files(self, group):
         if group not in self.available_groups():
             # year-based grouping
-            flacs = sorted(glob(os.path.join(self.path, group, '*.flac')))
+            flacs = sorted(glob.glob(os.path.join(self.path, group, '*.flac')))
             if len(flacs) == 0:
-                flacs = sorted(glob(os.path.join(self.path, group, '*.wav')))
+                flacs = sorted(glob.glob(os.path.join(self.path, group, '*.wav')))
 
-            midis = sorted(glob(os.path.join(self.path, group, '*.midi')))
+            midis = sorted(glob.glob(os.path.join(self.path, group, '*.midi')))
             files = list(zip(flacs, midis))
             if len(files) == 0:
                 raise RuntimeError(f'Group {group} is empty')
@@ -243,8 +239,8 @@ class GuitarSet(PianoRollAudioDataset):
 
     def files(self, group):
         print(f"Looking for data in path {self.path} for group {group}")
-        # flacs = sorted(glob(os.path.join(self.path, "audio", '*solo*.wav')))
-        # midis = sorted(glob(os.path.join(self.path, "labels", '*solo*.jams.mid')))
+        # flacs = sorted(glob.glob(os.path.join(self.path, "audio", '*solo*.wav')))
+        # midis = sorted(glob.glob(os.path.join(self.path, "labels", '*solo*.jams.mid')))
         if group in self.available_groups():
             flacs = sorted(
                 glob.glob(os.path.join(self.path, group, "audio", '*.wav')))
@@ -275,13 +271,13 @@ class SynthesizedTrumpet(PianoRollAudioDataset):
         return ['train', 'test', 'val']
 
     def files(self, group):
-        # flacs = sorted(glob(os.path.join(self.path, "audio", '*solo*.wav')))
-        # midis = sorted(glob(os.path.join(self.path, "labels", '*solo*.jams.mid')))
+        # flacs = sorted(glob.glob(os.path.join(self.path, "audio", '*solo*.wav')))
+        # midis = sorted(glob.glob(os.path.join(self.path, "labels", '*solo*.jams.mid')))
         if group in self.available_groups():
             flacs = sorted(
-                glob(os.path.join(self.path, group, "audio", '*.wav')))
+                glob.glob(os.path.join(self.path, group, "audio", '*.wav')))
             midis = sorted(
-                glob(os.path.join(self.path, group, "labels", '*.mid')))
+                glob.glob(os.path.join(self.path, group, "labels", '*.mid')))
             files = list(zip(flacs, midis))
         if len(files) == 0:
             raise RuntimeError(f'Group {group} is empty')
@@ -307,15 +303,15 @@ class SynthesizedInstruments(PianoRollAudioDataset):
         return ['train', 'test', 'val']
 
     def files(self, group):
-        # flacs = sorted(glob(os.path.join(self.path, "audio", '*solo*.wav')))
-        # midis = sorted(glob(os.path.join(self.path, "labels", '*solo*.jams.mid')))
+        # flacs = sorted(glob.glob(os.path.join(self.path, "audio", '*solo*.wav')))
+        # midis = sorted(glob.glob(os.path.join(self.path, "labels", '*solo*.jams.mid')))
         wavs = []
         labels = []
         if group in self.available_groups():
-            for paths in glob(self.path+"*"):
+            for paths in glob.glob(self.path+"*"):
                 print(f"Adding instrument from {paths} to {group}")
-                found_wavs += sorted(
-                    glob(os.path.join(paths, group, "audio", '*.wav')))
+                found_wavs = sorted(
+                    glob.glob(os.path.join(paths, group, "audio", '*.wav')))
                 for wav in found_wavs:
                     label = find_label_for_given_wav(os.path.join(paths, group, "labels"), wav)
                     if label == None:
@@ -381,7 +377,7 @@ class OriginalMAPS(PianoRollAudioDataset):
         if group in self.available_groups():
             path_to_wavs_list = os.path.join(self.path, f"list_of_maps_wavs_{group}.np")
             if(not os.path.exists(path_to_wavs_list) or self.refresh == True):
-                list_of_wavs = glob(self.path+"/**/"+ f'*{group}.wav', recursive=True)
+                list_of_wavs = glob.glob(self.path+"/**/"+ f'*{group}.wav', recursive=True)
                 list_of_wavs = list(filter(lambda elem: "MUS" in elem, list_of_wavs))
                 np.save(path_to_wavs_list, list_of_wavs)
             else:
@@ -389,7 +385,7 @@ class OriginalMAPS(PianoRollAudioDataset):
                 list_of_wavs = np.load(path_to_wavs_list)
             path_to_midis_list = os.path.join(self.path, f"list_of_maps_midis_{group}.np")
             if(not os.path.exists(path_to_midis_list) or self.refresh == True):
-                list_of_midis = glob(self.path+"/**/"+ f'*{group}.mid', recursive=True)
+                list_of_midis = glob.glob(self.path+"/**/"+ f'*{group}.mid', recursive=True)
                 list_of_midis = list(filter(lambda elem: "MUS" in elem, list_of_midis))
                 np.save(path_to_midis_list, list_of_midis)
             else:
@@ -460,15 +456,15 @@ class MusicNet(PianoRollAudioDataset):
             types = ('2303.flac', '2382.flac', '1819.flac')
             flacs = []
             for i in types:
-                flacs.extend(glob(os.path.join(self.path, 'test_data', i)))
+                flacs.extend(glob.glob(os.path.join(self.path, 'test_data', i)))
             flacs = sorted(flacs)
             tsvs = sorted(
-                glob(os.path.join(self.path, f'tsv_test_labels/*.tsv')))
+                glob.glob(os.path.join(self.path, f'tsv_test_labels/*.tsv')))
         else:
             flacs = sorted(
-                glob(os.path.join(self.path, f'{group}_data/*.flac')))
+                glob.glob(os.path.join(self.path, f'{group}_data/*.flac')))
             tsvs = sorted(
-                glob(os.path.join(self.path, f'tsv_{group}_labels/*.tsv')))
+                glob.glob(os.path.join(self.path, f'tsv_{group}_labels/*.tsv')))
 
         assert(all(os.path.isfile(flac) for flac in flacs))
         assert(all(os.path.isfile(tsv) for tsv in tsvs))

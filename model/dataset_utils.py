@@ -10,7 +10,7 @@ def extract_opus(filename):
 
 def find_label_for_given_wav(path, wav_filename):
     opus = extract_opus(wav_filename)
-    list_of_labels = glob(f"{path}**/*{opus}*")
+    list_of_labels = glob.glob(f"{path}**/*{opus}*")
     if len(list_of_labels):
         return list_of_labels[0]
     else:
