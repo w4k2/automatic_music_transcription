@@ -46,6 +46,8 @@ def prepare_list_of_tuples_with_audio_and_label_filenames(zipped_file):
             # check if opus for audio is the same as for midi:
             audio_opus = extract_opus(audio_path)
             midi_opus = extract_opus(midi_path)
-            assert audio_opus == midi_opus
+            if audio_opus not in midi_opus:
+                print(f"WARNING - audio {audio_opus} opus is not in midi {midi_opus} opus")
+                assert False
             result.append((audio_path, midi_path))
         return result

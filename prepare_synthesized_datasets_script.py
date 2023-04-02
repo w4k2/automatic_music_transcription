@@ -5,6 +5,7 @@ import shutil
 import pretty_midi
 import pprint
 import os
+import glob
 import sys
 from midi2audio import FluidSynth
 from tsv_label import TsvLabel
@@ -21,6 +22,10 @@ def get_all_guitarset_midis(directory):
                 listOfFiles.append(os.path.join(dirpath, file))
     return listOfFiles
 
+def get_all_maestro_midis(directory):
+    listOfFiles = glob.glob(f"{directory}/**/*.midi")
+    print(listOfFiles)
+    return listOfFiles
 
 def get_all_MAPS_tsvs(MAPS_subdirectory, directory):
     listOfFiles = []
@@ -154,47 +159,61 @@ def remove_if_exists(filename):
     else:
         print(f"Can not delete {filename} as it doesn't exists")
 
-def synthesize_instrument_for_labels(labels, output_directory, instrument_name):
+class LabelInfo:
+    def __init__(self, label, program, output_directory, instrument_name):
+        self.label = label
+        self.program = program
+        self.output_directory = output_directory
+        self.instrument_name = instrument_name
 
+def synthesize_for_label(label_info):
+    label = label_info.label
+    program = label_info.program
+    output_directory = label_info.output_directory
+    instrument_name = label_info.instrument_name
+    if label[-3:] == "mid" or label [-4:] == "midi":
+        try:
+            midi = pretty_midi.PrettyMIDI(label)
+            midi = convert_to_another_instrument(midi, program)
+            midi.write(
+                f'{output_directory}/{os.path.basename(label)}_temp.mid')
+            with io.capture_output() as captured:
+                fs.midi_to_audio(f'{output_directory}/{os.path.basename(label)}_temp.mid',
+                                f'{output_directory}/{os.path.basename(label)}.wav')
+            os.remove(f'{output_directory}/{os.path.basename(label)}_temp.mid')
+            os.rename(f'{output_directory}/{os.path.basename(label)}.wav',
+                    f'{output_directory}/{os.path.basename(label)[:-9]}_hex.wav')
+        except:
+            print(f"File {label} generation for {instrument_name} needs to be skipped - problem detected during midi analysis")
+            remove_if_exists(f'{output_directory}/{os.path.basename(label)}_temp.mid')
+            remove_if_exists(f'{output_directory}/{os.path.basename(label)[:-9]}_hex.wav')
+            remove_if_exists(f'{output_directory}/{os.path.basename(label)}.wav')
+    elif label[-3:] == 'tsv':
+        try:
+            tsv_label = TsvLabel(label)
+            tsv_midi = tsv_label.to_pretty_midi()
+            tsv_midi = convert_to_another_instrument(tsv_midi, program)
+            tsv_midi.write(
+                f'{output_directory}/{os.path.basename(label)}_temp.mid')
+            with io.capture_output() as captured:
+                fs.midi_to_audio(f'{output_directory}/{os.path.basename(label)}_temp.mid',
+                                f'{output_directory}/{os.path.basename(label)}.wav')
+            os.remove(f'{output_directory}/{os.path.basename(label)}_temp.mid')
+        except Exception as e:
+            print(f"File {label} generation for {instrument_name} needs to be skipped - problem detected during tsv analysis")
+            remove_if_exists(f'{output_directory}/{os.path.basename(label)}_temp.mid')
+            remove_if_exists(f'{output_directory}/{os.path.basename(label)}.wav')
+    else:
+        raise Exception(f"BUG! UNSUPPORTED FILE - {label}")
+
+def synthesize_instrument_for_labels(labels, output_directory, instrument_name):
     program = pretty_midi.instrument_name_to_program(instrument_name)
     print(
         f"Detected program for given instrument {instrument_name}: {program} - copying to {output_directory} directory!")
     os.makedirs(f'{output_directory}')
-    for label in labels:
-        if label[-3:] == "mid":
-            try:
-                midi = pretty_midi.PrettyMIDI(label)
-                midi = convert_to_another_instrument(midi, program)
-                midi.write(
-                    f'{output_directory}/{os.path.basename(label)}_temp.mid')
-                with io.capture_output() as captured:
-                    fs.midi_to_audio(f'{output_directory}/{os.path.basename(label)}_temp.mid',
-                                    f'{output_directory}/{os.path.basename(label)}.wav')
-                os.remove(f'{output_directory}/{os.path.basename(label)}_temp.mid')
-                os.rename(f'{output_directory}/{os.path.basename(label)}.wav',
-                        f'{output_directory}/{os.path.basename(label)[:-9]}_hex.wav')
-            except:
-                print(f"File {label} generation for {instrument_name} needs to be skipped - problem detected during midi analysis")
-                remove_if_exists(f'{output_directory}/{os.path.basename(label)}_temp.mid')
-                remove_if_exists(f'{output_directory}/{os.path.basename(label)[:-9]}_hex.wav')
-                remove_if_exists(f'{output_directory}/{os.path.basename(label)}.wav')
-        elif label[-3:] == 'tsv':
-            try:
-                tsv_label = TsvLabel(label)
-                tsv_midi = tsv_label.to_pretty_midi()
-                tsv_midi = convert_to_another_instrument(tsv_midi, program)
-                tsv_midi.write(
-                    f'{output_directory}/{os.path.basename(label)}_temp.mid')
-                with io.capture_output() as captured:
-                    fs.midi_to_audio(f'{output_directory}/{os.path.basename(label)}_temp.mid',
-                                 f'{output_directory}/{os.path.basename(label)}.wav')
-                os.remove(f'{output_directory}/{os.path.basename(label)}_temp.mid')
-            except Exception as e:
-                print(f"File {label} generation for {instrument_name} needs to be skipped - problem detected during tsv analysis")
-                remove_if_exists(f'{output_directory}/{os.path.basename(label)}_temp.mid')
-                remove_if_exists(f'{output_directory}/{os.path.basename(label)}.wav')
-        else:
-            raise Exception(f"BUG! UNSUPPORTED FILE - {label}")
+    labels = [LabelInfo(label, program, output_directory, instrument_name) for label in labels]
+    with Pool(12) as pool:
+        pool.map(synthesize_for_label, labels)
 
 
 def create_files_for_phase(directory, labels, instrument, phase):
@@ -205,12 +224,20 @@ def create_files_for_phase(directory, labels, instrument, phase):
                                      f'{directory_name}/{phase}/audio',
                                      instrument)
 
+def make_dir_if_not_exist(directory):
+    if not os.path.exists(directory):
+        os.makedirs(directory)
 
 def generate_datasets_for_instruments(instrument):
     # GuitarSet part of synthesized dataset
     train_filenames = []
     val_filenames = []
     test_filenames =[]
+    if maestro:
+        maestro_midis = get_all_maestro_midis("data/maestro-v3.0.0")
+        train_filenames, X_remaining = train_test_split(maestro_midis, test_size=0.9, random_state=33)
+        val_filenames, test_filenames = train_test_split(X_remaining, test_size=0.5, random_state=33)
+        
     if guitarset:
         print(f"Aquiring guitarset data for {instrument} instrument!")
         train_filenames = get_all_guitarset_midis("data/guitarset/train")
@@ -230,7 +257,7 @@ def generate_datasets_for_instruments(instrument):
             'ENSTDkCl', "data/MAPS/tsv/matched"))
 
     directory_name = f'{GLOBAL_PATH}/data/synthesized_{standarize_name(instrument)}'
-    os.makedirs(directory_name)
+    make_dir_if_not_exist(directory_name)
     create_files_for_phase(
         directory_name, train_filenames, instrument, 'train')
     create_files_for_phase(directory_name, test_filenames, instrument, 'test')
@@ -243,11 +270,12 @@ assert (len(sys.argv) == 2)
 global GLOBAL_PATH
 global guitarset
 global maps
+global maestro
 
 GLOBAL_PATH = sys.argv[1]
 guitarset = True
 maps = True
-with Pool(12) as pool:
-    if not os.path.exists(GLOBAL_PATH):
-        os.mkdir(GLOBAL_PATH)
-    pool.map(generate_datasets_for_instruments, instrument_list)
+maestro = False
+make_dir_if_not_exist(GLOBAL_PATH)
+for instrument in instrument_list:
+    generate_datasets_for_instruments(instrument)

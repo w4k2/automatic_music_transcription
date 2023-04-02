@@ -150,10 +150,6 @@ class PianoRollAudioDataset(Dataset):
         label = torch.zeros(n_steps, n_keys, dtype=torch.uint8)
         velocity = torch.zeros(n_steps, n_keys, dtype=torch.uint8)
 
-        tsv_path = tsv_path
-        midi = np.loadtxt(tsv_path, delimiter='\t', skiprows=1)
-        if not isinstance(midi[0], np.ndarray):
-            midi = [midi]
         #if label extension is tsv
         label_extension = tsv_path.split(".")[-1]
         if label_extension == "tsv":
