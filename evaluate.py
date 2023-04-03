@@ -70,9 +70,9 @@ def evaluate(spec, dataset, device, logdir, leave_one_out, weight_file, dataset_
     dataset_data = create_transcription_datasets(dataset_type=dataset)
     TestDataset = dataset_data[2][0]
     test_dataset_groups = dataset_data[2][1]
-
+    #remember to validate on whole sequence
     validation_dataset = TestDataset(dataset_root_dir=dataset_root_dir, groups=test_dataset_groups,
-                                     sequence_length=327680, device=device, refresh=refresh)
+                                     sequence_length=None, device=device, refresh=refresh)
 
 
     model = UnetTranscriptionModel(ds_ksize, ds_stride,
