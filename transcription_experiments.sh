@@ -25,4 +25,14 @@ python train.py with train_on=GuitarSet logdir=results/transferred_unet_model_tr
 evaluate_model results/transferred_unet_model_trained_on_MAPS/model-$epoches.pt
 evaluate_model results/transferred_unet_model_trained_on_GuitarSet/model-$epoches.pt
 
+#TRANSFER FROM GUITARSET
+python train.py with train_on=MAPS logdir=results/transferred_from_guitarset_unet_model_trained_on_MAPS model_type=unet pretrained_model_path=results/unet_model_trained_on_GuitarSet/model-$epoches.pt epoches=$epoches seed=$seed
+evaluate_model results/transferred_from_guitarset_unet_model_trained_on_MAPS/model-$epoches.pt
+
+#TRANSFER FROM MAPS
+python train.py with train_on=GuitarSet logdir=results/transferred_from_MAPS_unet_model_trained_on_GuitarSet model_type=unet pretrained_model_path=results/unet_model_trained_on_MAPS/model-$epoches.pt epoches=$epoches seed=$seed
+evaluate_model results/transferred_from_MAPS_unet_model_trained_on_GuitarSet/model-$epoches.pt
+
 python result_dict_analysis.py
+
+python result_table_generator.py results/unet_model_trained_on_MAPS results/unet_model_trained_on_GuitarSet results/unet_model_trained_on_SynthesizedInstruments  results/transferred_unet_model_trained_on_MAPS results/transferred_unet_model_trained_on_GuitarSet results/transferred_from_guitarset_unet_model_trained_on_MAPS results/transferred_from_MAPS_unet_model_trained_on_GuitarSet > table.txt

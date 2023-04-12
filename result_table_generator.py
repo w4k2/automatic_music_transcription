@@ -2,7 +2,7 @@ import sys
 import glob
 import os
 
-validated_datasets = ["MAPS", "GuitarSet", "SynthesizedInstruments"]
+validated_datasets = ["MAPS", "GuitarSet"]
 number_of_compared_models = len(sys.argv) - 1
 models_to_be_compared = sys.argv[1:]
 
